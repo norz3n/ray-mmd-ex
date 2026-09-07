@@ -144,7 +144,7 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	float shadowTerm = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE) ? shadow : min(shadow, saturate(dot(material.normal, L) * 4));
 	float2x3 energy = SurfaceEnergy(material, material.normal, L, V, shadowTerm);
 #endif
-	float3 subsurface = SubsurfaceShading(material, material.normal, L, V, coord);
+	float3 subsurface = SubsurfaceShading(material, material.normal, L, V, coord, material.visibility, shadow);
 
 	bool isSkinMat = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	diffuse = (energy[0] + subsurface * (isSkinMat ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow)) * lightColor;

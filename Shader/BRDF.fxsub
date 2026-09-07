@@ -18,6 +18,40 @@ float3 fresnelSchlick(float3 f0, float3 f9, float vh)
 	return lerp(f0, f9, pow5(1 - vh));
 }
 
+// Fresnel model selection: 0 = Schlick (classic), 1 = Adobe F82.
+// NOTE: the knob is a #define (not a float knob) because it swaps the actual
+// fresnel kernel; default keeps the legacy Schlick look so existing materials
+// and presets are unchanged.
+#ifndef BRDF_FRESNEL_TYPE
+#define BRDF_FRESNEL_TYPE 0
+#endif
+
+/**
+ * [Kutz et al. 2021, "Novel aspects of the Adobe Standard Material", Sec. 2.3]
+ * Anchors the fresnel curve at F0 (normal incidence) and F82 (82 deg, f82 here).
+ * Unlike pure Schlick, the curve can dip BETWEEN the two anchors mid-range,
+ * which preserves hue variation of colored speculars (metals, coated fabrics,
+ * iridescent films) instead of washing out to lerp(F0, F90). Constants are
+ * pre-folded for CosThetaMax = 1/7; code matches the paper's correct
+ * implementation, not the (buggy) printed formulas.
+ */
+float3 fresnelSchlickAdobeF82(float3 f0, float3 f82, float vh)
+{
+	const float Fc = pow5(1 - vh);
+	const float K = 49.0 / 46656.0;
+	float3 b = (K - K * f82) * (7776.0 + 9031.0 * f0);
+	return saturate(f0 + Fc * ((1 - f0) - b * (vh - vh * vh)));
+}
+
+float3 fresnelSchlickF(float3 f0, float3 f90, float vh)
+{
+#if BRDF_FRESNEL_TYPE == 1
+	return fresnelSchlickAdobeF82(f0, f90, vh);
+#else
+	return fresnelSchlick(f0, f90, vh);
+#endif
+}
+
 float ComputeAmbientMicroOcclusion(float nl, float ao)
 {
 	float aperture = 2.0 * ao;
@@ -25,9 +59,144 @@ float ComputeAmbientMicroOcclusion(float nl, float ao)
 	return shadow;
 }
 
+// ---------------------------------------------------------------------------
+// Skin / subsurface: artist-facing knobs ported from UE ShadingModels.ush
+// ---------------------------------------------------------------------------
+
+// Skin SSS style: 0 = pre-integrated Jimenez LUT polynomial (default),
+// 1 = UE's cheap artist toolchain (SubsurfaceBxDF cheat: WrappedDiffuse +
+// BackScatter + InScatter + HSV-luminance-preserving hue-shifted transmission).
+#ifndef SKIN_SSS_STYLE
+#define SKIN_SSS_STYLE 0
+#endif
+
+// [UE mobile skin] Pokey skin through cast shadows: NoL is backed off by the
+// shadow factor so the terminator rises inside dark shadow regions.
+// 0 = off (default), 1 = on.
+#ifndef SKIN_SHADOW_ROTATE
+#define SKIN_SHADOW_ROTATE 0
+#endif
+
+// Authorable dual-lobe skin specular (cf. SubsurfaceProfileCommon.ush: the two
+// lobe widths and the mix are profile data, not hard constants). Defaults
+// reproduce the previous DualLobeSkinSpecular behavior exactly.
+#ifndef SKIN_SPEC_LOBE0_SCALE
+#define SKIN_SPEC_LOBE0_SCALE 1.15
+#endif
+#ifndef SKIN_SPEC_LOBE0_ADD
+#define SKIN_SPEC_LOBE0_ADD 0.05
+#endif
+#ifndef SKIN_SPEC_LOBE1_SCALE
+#define SKIN_SPEC_LOBE1_SCALE 0.35
+#endif
+#ifndef SKIN_SPEC_LOBE1_ADD
+#define SKIN_SPEC_LOBE1_ADD 0.02
+#endif
+#ifndef SKIN_SPEC_LOBE0_MIX
+#define SKIN_SPEC_LOBE0_MIX 0.70
+#endif
+#ifndef SKIN_SPEC_LOBE1_MIX
+#define SKIN_SPEC_LOBE1_MIX 0.30
+#endif
+
+// Henyey-Greenstein anisotropy "g" of the forward-scattering backlit lobe
+// (scattering distribution). 0 = isotropic, closer to 1 = narrow electric
+// glow through thin features (ears, nose). UE skin profiles use ~0.6-0.8.
+#ifndef SKIN_BACKLIT_G
+#define SKIN_BACKLIT_G 0.76
+#endif
+
+// IOR of the skin dielectric used to refract V into the medium (UE
+// TransmissionParams.OneOverIOR = 1/IOR).
+#ifndef SKIN_BACKLIT_IOR
+#define SKIN_BACKLIT_IOR 1.4
+#endif
+
+// Backlit lobe strength (0 = off, default preserved look).
+#ifndef SKIN_BACKLIT_STRENGTH
+#define SKIN_BACKLIT_STRENGTH 0
+#endif
+
+// Global mean-free-path multiplier: >1 pushes SSS light deeper (wider wraps,
+// longer penetration), <1 shrinks it. Applies to both skin styles.
+#ifndef SKIN_SSS_MFP_SCALE
+#define SKIN_SSS_MFP_SCALE 1.0
+#endif
+
+// [ColorSpace.ush, Sam Hocevar / Inigo Quilez]
+float3 HUE2LinearRGB(float h)
+{
+	float r = abs(h * 6 - 3) - 1;
+	float g = 2 - abs(h * 6 - 2);
+	float b = 2 - abs(h * 6 - 4);
+	return saturate(float3(r, g, b));
+}
+
+float3 HSV2LinearRGB(float3 hsv)
+{
+	float3 rgb = HUE2LinearRGB(hsv.x);
+	return ((rgb - 1) * hsv.y + 1) * hsv.z;
+}
+
+float3 RGB2HCV(float3 rgb)
+{
+	// Based on work by Sam Hocevar and Emil Persson
+	float4 p = (rgb.g < rgb.b) ? float4(rgb.bg, -1.0f, 2.0f / 3.0f) : float4(rgb.gb, 0.0f, -1.0f / 3.0f);
+	float4 q = (rgb.r < p.x) ? float4(p.xyw, rgb.r) : float4(rgb.r, p.yzx);
+	float chroma = q.x - min(q.w, q.y);
+	float hue = abs((q.w - q.y) / (6.0f * chroma + 1e-10f) + q.z);
+	return float3(hue, chroma, q.x);
+}
+
+float3 LinearRGB2HSV(float3 rgb)
+{
+	float3 hcv = RGB2HCV(rgb);
+	float s = hcv.y / (hcv.z + 1e-10f);
+	return float3(hcv.x, s, hcv.z);
+}
+
+// [ParticipatingMediaCommon.ush] Beer-Lambert conversion. Thickness in
+// "normalized meters" so SKIN_SSS_MFP_SCALE becomes the artist MFP knob.
+#define SKIN_MIN_TRANSMITTANCE 1e-3f
+
+float3 TransmittanceToExtinction(float3 transmittanceColor, float thickness)
+{
+	return -log(clamp(transmittanceColor, SKIN_MIN_TRANSMITTANCE, 1.0f)) / thickness;
+}
+
+float3 ExtinctionToTransmittance(float3 extinction, float thickness)
+{
+	return exp(-extinction * thickness);
+}
+
+// [ShadingModels.ush:738-744] Hue-shift the transmittance color while keeping
+// its luminance intact: swap HSV value channel for the authored color's,
+// converting only chroma. This is what removes the "patchy brightness" of
+// albedo-driven SSS while retaining hue variety across the terminator.
+float3 HueShiftTransmittance(float3 transmittanceColor, float3 authoredColor)
+{
+	float3 rawHueHSV = LinearRGB2HSV(transmittanceColor);
+	float3 authoredHSV = LinearRGB2HSV(authoredColor);
+	// Keep the hue/chroma of the extinguished color, take the luminance (V) of
+	// the authored transmittance color
+	return HSV2LinearRGB(float3(rawHueHSV.x, rawHueHSV.y, authoredHSV.z));
+}
+
+// [ShadingModels.ush:568 ApproximateHG] Henyey-Greenstein phase, artist form
+float ApproximateHG(float cosTheta, float g)
+{
+	float g2 = g * g;
+	float gcos2 = 1.0f - (g * cosTheta);
+	gcos2 *= gcos2;
+	return 0.5f * (1.0f - g2) / max(1e-5f, gcos2);
+}
+
 /**
- * Multi-spectral Subsurface Scattering with Dermal Chromatic Dispersion (Penner & Borshukov).
- * Simulates wavelength-dependent skin diffusion and saturated reddish terminator fringing.
+ * Multi-spectral Subsurface Scattering (Penner & Borshukov, upstream-exact).
+ * Transmittance color comes exclusively from material.customDataB (authored,
+ * uniform per material) — never synthesized from texture albedo: albedo-derived
+ * SSS color makes the terminator response vary patchily across blush/shadow
+ * makeup zones of the skin texture.
  */
 float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 {
@@ -36,94 +205,119 @@ float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 	float pndl = saturate( nl);
 	float nndl = saturate(-nl);
 
-	float ir = max(material.customDataA, 0.01f);
-	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
-	float3 sss = sssColor * pow2(1.0f - pndl) * pow(1.0f - nndl, 3.0f / (ir + 0.001f)) * saturate(ir - 0.04f);
+	// SKIN_SSS_MFP_SCALE stretches the authored "inverse radius" so one knob
+	// pushes the SSS wrap deeper across the whole model
+	float ir = material.customDataA * SKIN_SSS_MFP_SCALE;
+	float3 sss = material.customDataB * pow2(1.0 - pndl) * pow(1.0 - nndl, 3.0 / (ir + 0.001)) * saturate(ir - 0.04);
 
-	// Chromatic dispersion fringe: narrow saturated blood-glow peak exactly along the shadow boundary (N.L ~ 0)
-	float terminatorFringe = exp(-pow2(nl / max(ir * 0.35f, 0.08f))) * saturate(ir * 1.5f);
-	float3 chromaticBlood = float3(1.0f, 0.22f, 0.04f) * sssColor * terminatorFringe * 0.45f;
-
-	return sss + chromaticBlood;
+	return sss;
 }
 
-float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0))
+/**
+ * [ShadingModels.ush:716 SubsurfaceBxDF] The classic UE artist cheat SSS:
+ *   - WrappedDiffuse with (w=1/3, n=1.5): normal-dependence of the SSS lobe is
+ *     one authored scalar (material.customDataA: 0 = none, 1 = strong).
+ *   - BackScatter scales AO-based micro-occlusion against the wrapped normal
+ *     contribution, putting a subtle glow into skin creases.
+ *   - InScatter: view-dependent forward-scatter glow (dot(L, -V)^12).
+ *   - Transmission color from Beer-Lambert extinction of the authored
+ *     transmittance (customDataB), hue-shifted with the luminance preserved.
+ */
+float3 SubsurfaceShadingCheatSkin(MaterialParam material, float3 N, float3 L, float3 V, float ao, float shadow)
 {
+	float opacity = saturate(material.customDataA);
+	float3 sssColor = material.customDataB;
+
 	float nl = dot(N, L);
-	if (nl > 0.25f) return 0; // Only activate when light is penetrating from behind the surface
 
-	// Subsurface transmission for thin organic features (ears, nose, fingers under backlight)
-	// Physically-modeled forward scattering lobe (Heyney-Greenstein phase approximation)
-	float3 distortedL = normalize(L + N * 0.28f);
-	float vdotL = saturate(dot(V, -distortedL));
-	float forwardScatter = pow(vdotL, 9.0f) * 2.5f;
+	// Wrap around lighting (simplified version, w = 0.5/1.5, n = 1.5)
+	const float wrappedDiffuse = pow(saturate(madd(nl, 1.0f / 1.5f, 0.5f / 1.5f)), 1.5f) * (2.5f / 1.5f);
+	const float normalContribution = lerp(1.0f, wrappedDiffuse, opacity);
 
-	// Wide diffuse transmission wrap across backward hemisphere
-	float wrapScatter = saturate((-nl + 0.35f) / 1.35f) * 0.65f;
+	// AO-scaled back-scatter glow that lives in creases / shadowed skin
+	const float backScatter = ao * normalContribution * shadow / (PI * 2);
 
-	// Multi-spectral flesh transmission (red wavelength penetrates deep into dermis/subcutis)
-	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
-	float3 spectralTrans = float3(1.0f, 0.36f, 0.10f) * sssColor;
+	// View-dependent thin-feature transmission glow (shadow must not multiply:
+	// the point of InScatter is to light faces backlit through the mesh)
+	const float inScatter = pow(saturate(dot(L, -V)), 12.0f) * lerp(3.0f, 0.1f, opacity);
 
-	// Screen-space depth-thickness measurement:
-	// March several probes along the light ray to find the back surface. A single tiny probe
-	// always lands on the front surface itself (geoThickness ~ 0), so translucency fired at
-	// full strength regardless of actual limb thickness; overshooting probes hit the far
-	// background and correctly extinguish transmission through thick geometry.
-	// The measured thickness only gates the forward (through-)lobe: wrapScatter is a LOCAL
-	// terminator diffusion term and must not respond to geometry far behind the limb —
-	// letting probes hit the body/hair behind a limb along the light ray extinguished the
-	// wrap and painted dark blotches wherever a limb overlapped other geometry.
-	float thicknessScale = 1.0f;
-	if (any(coord))
-	{
-		float2 lightStep = -L.xy / max(material.linearDepth, 1.0f);
-		float backDepth = material.linearDepth;
-		[unroll]
-		for (int t = 1; t <= 3; ++t)
-		{
-			float2 probeUV = coord + lightStep * (0.03f * float(t * t));
-			float probeDepth = tex2Dlod(Gbuffer8Map, float4(probeUV, 0, 0)).r;
-			if (probeDepth > 1e-4f) // skip sky/background holes: they must not read as "no back surface"
-				backDepth = max(backDepth, probeDepth);
-		}
-		float geoThickness = max(0.0f, backDepth - material.linearDepth);
-		thicknessScale = exp(-geoThickness * 4.5f);
-	}
+	// Beer-Lambert extinction -> transmittance at 1 normalized meter, then the
+	// luminance-preserving hue shift (keeps chroma variety, no Y-shift)
+	const float3 extinction = TransmittanceToExtinction(sssColor, 1.0f) / SKIN_SSS_MFP_SCALE;
+	const float3 transColor = ExtinctionToTransmittance(extinction, 1.0f);
+	const float3 hueShifted = HueShiftTransmittance(transColor, sssColor);
 
-	// Curvature extinction is a local surface response
-	float curvature = max(material.customDataA, 0.01f);
-	float opticalDensity = exp(-curvature * 2.8f);
-
-	return spectralTrans * ((forwardScatter * thicknessScale + wrapScatter) * opticalDensity * 0.6f);
+	const float transmittance = saturate(1.0f - saturate(dot(N, L)));
+	return lerp(backScatter, 1.0f, inScatter) * lerp(hueShifted, sssColor, shadow) * (PI * 2) * transmittance * saturate(opacity);
 }
 
-float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L)
+/**
+ * [ShadingModels.ush:652-663] Physically-motivated backlit glow: HG phase
+ * evaluated at the REFRACTED view direction inside the dielectric, so the
+ * glow narrows around the exact through-body direction (ears, fingers).
+ */
+float3 SubsurfaceShadingBacklitGlow(MaterialParam material, float3 N, float3 L, float3 V)
 {
-	float ndotl = dot(N, L);
-	float curvature = max(material.customDataA, 0.01f);
-	float scatter = saturate(curvature * 2.5f);
-	
-	// Wavelength-dependent wrap with intrinsic epidermal baseline + subdermal curvature scaling:
-	// Red light penetrates deepest (0.45), green moderately (0.22), blue minimally (0.08)
-	float3 baseWrap = float3(0.45f, 0.22f, 0.08f);
-	float3 wrap = lerp(baseWrap, float3(0.70f, 0.38f, 0.18f), scatter);
-	float3 ndotl_wrap = saturate((ndotl + wrap) / (1.0f + wrap));
-	float3 scatter_profile = ndotl_wrap * ndotl_wrap;
-	
-	float3 energy_normalization = 1.0f / (1.0f + wrap * 0.5f);
-	// Smooth C^1 quadratic edge mask avoids the sharp derivative crease of 1 - abs(ndotl)
-	float edge_mask = saturate(1.0f - ndotl * ndotl);
-	float3 blood_scatter = float3(0.35f, 0.06f, 0.015f) * edge_mask * max(scatter, 0.35f) * energy_normalization;
-	
-	// Saturated chromatic dispersion fringe along the shadow boundary (smooth width avoids localized spot spikes)
-	float fringeWidth = lerp(0.18f, 0.32f, scatter);
-	float terminatorFringe = exp(-pow2(ndotl / fringeWidth)) * max(scatter, 0.35f);
-	float3 chromaticBlood = float3(0.45f, 0.10f, 0.025f) * terminatorFringe;
+	float3 refracV = refract(V, -N, 1.0f / SKIN_BACKLIT_IOR);
+	if (dot(refracV, refracV) < 1e-4f)
+		return 0;
+	float phase = ApproximateHG(dot(-L, refracV), SKIN_BACKLIT_G);
+	// Gate into the past-light hemisphere: the glow only exists when light hits
+	// the back of the feature
+	return material.customDataB * material.albedo * (phase * SKIN_BACKLIT_STRENGTH * saturate(-dot(N, L) + 0.1f));
+}
 
-	float3 brdf = (scatter_profile * energy_normalization) + blood_scatter + chromaticBlood;
-	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
-	return lerp(brdf, brdf * sssColor, 0.5f);
+// [ShadingModels.ush:617-620, mobile skin] Pokey skin through cast shadows:
+// the unclamped NoL is backed off by the shadow factor inside dark shadow
+// regions so the terminator rises and skin reads as lit through thin shadow.
+float SkinRotatedNoL(float unClampedNoL, float surfaceShadow)
+{
+	float shadowFactor = 1.0f - sqrt(max(surfaceShadow, 0.0f));
+	return max(unClampedNoL - max(2.0f * unClampedNoL, 0.4f) * shadowFactor, -1.0f);
+}
+
+/**
+ * Analytic pre-integrated skin (upstream-exact polynomial of the Jimenez LUT).
+ * Smooth in BOTH the half-Lambert remapped nl and the curvature remap — no
+ * saturation-driven piecewise terms, no kinks at the terminator, no probes.
+ * curvatures enter only as a coordinate of the curve, keeping the response
+ * scale-independent across models of different sizes.
+ * `nlOverride` (optional, unclamped dot(N,L)) lets e.g. SkinRotatedNoL drive
+ * the terminator instead of the raw geometric dot product.
+ */
+float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L, float nlOverride = -2.0f)
+{
+	float nl = (nlOverride > -1.5f) ? saturate(nlOverride * 0.5f + 0.5f) : saturate(dot(N, L) * 0.5f + 0.5f);
+	float curvature = material.customDataA * SKIN_SSS_MFP_SCALE;
+	float curva = (1.0 / madd(curvature, 0.5 - 0.0625, 0.0625) - 2.0) / (16.0 - 2.0);
+	float oneMinusCurva = 1.0 - curva;
+
+	float3 rangeMin = float3(0.0, 0.3, 0.3);
+	float3 rangeMax = float3(1.0, 0.7, 0.7);
+	float3 offset = float3(0.0, 0.06, 0.06);
+	float3 t = saturate(madd(nl, 1.0 / (rangeMax - rangeMin), (offset + rangeMin) / (rangeMin - rangeMax)));
+	float3 lowerLine = (t * t) * float3(0.65, 0.5, 0.9);
+	lowerLine.r += 0.045;
+	lowerLine.b *= t.b;
+
+	float3 m1 = float3(1.75, 2.0, 1.97);
+	float3 m2 = float3(1.95, 2.0, 2.0);
+
+	float3 lerpMin = float3(0.0, 0.35, 0.35);
+	float3 lerpMax = float3(1.0, 0.7, 0.6);
+	float3 lerpT = saturate(madd(nl, 1.0 / (lerpMax - lerpMin), lerpMin / (lerpMin - lerpMax)));
+
+	float3 upperLine1 = saturate(madd(nl, m1, float3(0.99, 0.99, 0.99) - m1));
+	float3 upperLine2 = saturate(madd(nl, m2, float3(0.99, 0.99, 1.0) - m2));
+
+	float3 curve1 = lerp(lowerLine, upperLine1, lerpT * lerpT);
+	float3 curve2 = upperLine2;
+
+	float oneMinusCurva2 = oneMinusCurva * oneMinusCurva;
+
+	float3 brdf = lerp(curve1, curve2, madd(oneMinusCurva2, -1.0 * oneMinusCurva2, 1.0));
+
+	return material.customDataB * brdf;
 }
 
 float BurleyBRDF(float nl, float nv, float vh, float roughness)
@@ -362,7 +556,7 @@ float3 SpecularBRDF_GGX(float nh, float nl, float vh, float nv, float roughness,
 
 	float3 f0 = specular;
 	float3 f90 = ComputeSpecularMicroOcclusion(f0);
-	float3 fresnel = fresnelSchlick(f0, f90, vh);
+	float3 fresnel = fresnelSchlickF(f0, f90, vh);
 
 	// Multi-scattering energy compensation for rough microfacets (Turquin 2018 / Fdez-Aguera)
 	float3 energyCompensation = 1.0f + f0 * (roughness * (1.0f - roughness) * 0.65f);
@@ -370,16 +564,91 @@ float3 SpecularBRDF_GGX(float nh, float nl, float vh, float nv, float roughness,
 	return fresnel * spec * energyCompensation;
 }
 
+// Angular radius of the "sphere light" used by SphereMaxNoH for highlight
+// softening / geometric anti-aliasing. float knob -> runtime branch, the
+// compiler folds the constant case; 0 (default) = exact point/area light H,
+// i.e. legacy behavior.
+#ifndef SPEC_LIGHT_SIN_ALPHA
+#define SPEC_LIGHT_SIN_ALPHA 0
+#endif
+
+/**
+ * [de Carpentier 2017, "Decima Engine: Advances in Lighting and AA"]
+ * Specular highlight softening for sphere/area-like lights: picks the largest
+ * NoH over the light's solid angle so the GGX lobe covers the whole visible
+ * region of the light instead of a single direction's half-vector. This kills
+ * the "far too small, shimmery highlight" artifact of analytic point-ish
+ * lighting on smooth materials and acts as specular geometric AA.
+ * SinAlpha = sin(asin(lightAngularRadius)); 0 disables (point-light behavior).
+ * nl is the unclamped dot(N,L), vl the unclamped dot(V,L).
+ */
+void SphereMaxNoH(inout float nl, inout float vl, float nv, float SinAlpha, inout float nh, inout float vh)
+{
+	if (SinAlpha > 0)
+	{
+		float CosAlpha = sqrt(1 - pow2(SinAlpha));
+
+		float RoL = 2 * nl * nv - vl;
+		if (RoL >= CosAlpha)
+		{
+			// The whole sphere is "front" of the half-vector region
+			nh = 1;
+			vh = abs(nv);
+		}
+		else
+		{
+			float rInvLengthT = SinAlpha * rsqrt(1 - RoL * RoL);
+			float NoTr = rInvLengthT * (nv - RoL * nl);
+			float VoTr = rInvLengthT * (2 * nv * nv - 1 - RoL * vl);
+
+			// Newton iteration (UE default bNewtonIteration = true):
+			// refined projection of the largest-NoH point using
+			// dot(cross(N,L), V) = sqrt(saturate(...))
+			float NxLoV = sqrt(saturate(1 - pow2(nl) - pow2(nv) - pow2(vl) + 2 * nl * nv * vl));
+
+			float NoBr = rInvLengthT * NxLoV;
+			float VoBr = rInvLengthT * NxLoV * 2 * nv;
+
+			float NoLVTr_n = nl * CosAlpha + nv + NoTr;	// A
+			float VoLVTr_n = vl * CosAlpha + 1 + VoTr;	// B
+
+			float p = NoBr * VoLVTr_n;
+			float q = NoLVTr_n * VoLVTr_n;
+			float s = VoBr * NoLVTr_n;
+
+			float xNum = q * (-0.5f * p + 0.25f * VoBr * NoLVTr_n);
+			float xDenom = p * p + s * (s - 2 * p) + NoLVTr_n * ((nl * CosAlpha + nv) * pow2(VoLVTr_n) + q * (-0.5f * (VoLVTr_n + vl * CosAlpha) - 0.5f));
+			float TwoX1 = 2 * xNum / (pow2(xDenom) + pow2(xNum));
+
+			float SinTheta = TwoX1 * xDenom;
+			float CosTheta = 1 - TwoX1 * xNum;
+
+			// Newton-refined projections of the largest-NoH point
+			NoTr = CosTheta * NoTr + SinTheta * NoBr;
+			VoTr = CosTheta * VoTr + SinTheta * VoBr;
+
+			// L re-projected onto the sphere: dot(N, L*CosAlpha + T*SinAlpha)
+			nl = nl * CosAlpha + NoTr;
+			vl = vl * CosAlpha + VoTr;
+
+			float InvLenH = rsqrt(2 + 2 * vl);
+			nh = saturate((nl + nv) * InvLenH);
+			vh = saturate(InvLenH + InvLenH * vl);
+		}
+	}
+}
+
 float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughness, float3 specular, float normalizeFactor)
 {
-	// Dual-lobe GGX model for organic skin:
+	// Dual-lobe GGX model for organic skin, with the lobe widths and mix as
+	// authorable macros (cf. SubsurfaceProfileCommon; profile data not code):
 	// Lobe 1 (Base Dermal Layer): Broad, matte lobe representing subsurface reflection and micro-porosity
 	// Lobe 2 (Epidermal / Sebum Layer): Tight, sharper specular representing skin moisture and lipid coating
-	float r1 = saturate(roughness * 1.15f + 0.05f);
-	float r2 = saturate(roughness * 0.35f + 0.02f);
+	float r1 = saturate(roughness * SKIN_SPEC_LOBE0_SCALE + SKIN_SPEC_LOBE0_ADD);
+	float r2 = saturate(roughness * SKIN_SPEC_LOBE1_SCALE + SKIN_SPEC_LOBE1_ADD);
 	float3 lobe1 = SpecularBRDF_GGX(nh, nl, vh, nv, r1, specular, normalizeFactor);
 	float3 lobe2 = SpecularBRDF_GGX(nh, nl, vh, nv, r2, specular, normalizeFactor);
-	return lobe1 * 0.70f + lobe2 * 0.30f;
+	return lobe1 * SKIN_SPEC_LOBE0_MIX + lobe2 * SKIN_SPEC_LOBE1_MIX;
 }
 
 float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
@@ -446,7 +715,7 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 
 		float3 f0 = specular;
 		float3 f90 = ComputeSpecularMicroOcclusion(f0);
-		float3 fresnel = fresnelSchlick(f0, f90, vh);
+		float3 fresnel = fresnelSchlickF(f0, f90, vh);
 
 		// Multi-scattering energy compensation for anisotropic surfaces
 		float3 energyCompensation = 1.0f + f0 * (roughness * (1.0f - roughness) * 0.65f);
@@ -456,6 +725,38 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 }
 
 #define pow2(x) ((x) * (x))
+
+// Cloth visibility model: 0 = Neubelt/Pettineo (cheap, default), 1 = full
+// Estevez & Kulla exponential fit. The fit costs 2× exp + a pow fit but gives
+// a noticeably better grazing-angle sheen falloff; off by default because
+// cloth shading runs in every lighting pass.
+#ifndef BRDF_CLOTH_VIS_CHARLIE
+#define BRDF_CLOTH_VIS_CHARLIE 0
+#endif
+
+// [Estevez and Kulla 2017, "Production Friendly Microfacet Sheen BRDF"]
+float Vis_Charlie_L(float x, float r)
+{
+	r = saturate(r);
+	r = 1.0f - (1.0f - r) * (1.0f - r);
+
+	float a = lerp(25.3245f, 21.5473f, r);
+	float b = lerp(3.32435f, 3.82987f, r);
+	float c = lerp(0.16801f, 0.19823f, r);
+	float d = lerp(-1.27393f, -1.97760f, r);
+	float e = lerp(-4.85967f, -4.32054f, r);
+
+	return a / ((1 + b * pow(x, c)) + d * x + e);
+}
+
+float Vis_Charlie(float roughness, float nv, float nl)
+{
+	// Remap x away from poles with the mirrored fit to avoid its singularity
+	float VisV = nv < 0.5f ? exp(Vis_Charlie_L(nv, roughness)) : exp(2 * Vis_Charlie_L(0.5f, roughness) - Vis_Charlie_L(1 - nv, roughness));
+	float VisL = nl < 0.5f ? exp(Vis_Charlie_L(nl, roughness)) : exp(2 * Vis_Charlie_L(0.5f, roughness) - Vis_Charlie_L(1 - nl, roughness));
+
+	return 1.0f / ((1 + VisV + VisL) * (4 * nv * nl));
+}
 
 /**
  * Charlie Sheen BRDF for cloth, fabric, silk, velvet, and microfibers (Estevez & Kulla 2017 / Sony Pictures Imageworks).
@@ -483,9 +784,14 @@ float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float 
 	// Charlie distribution: D(h) = (2 + 1/alpha) * sin(h)^(1/alpha) / (2 * PI)
 	float D_Charlie = (2.0f + invAlpha) * pow(sin2h, invAlpha * 0.5f) * InvPIE * 0.5f;
 	
-	// Neubelt & Pettineo visibility term with grazing singularity guard
+	// [ Estevez & Kulla 2017 / Neubelt & Pettineo ] Visibility model
+	// Neubelt & Pettineo term with grazing singularity guard
 	float denominator = 4.0f * (nl + nv - nl * nv) + 0.05f;
 	float V_Neubelt = 1.0f / denominator;
+#if BRDF_CLOTH_VIS_CHARLIE == 1
+	// Full-fit visibility: better grazing sheen than the Neubelt approximation
+	V_Neubelt = Vis_Charlie(clampedSheenRoughness, nv, nl);
+#endif
 	
 	// Fallback to albedo-tinted sheen if customDataB is unassigned
 	float3 sheenColor = any(material.customDataB > 1e-4f) ? material.customDataB : lerp(float3(1.0f, 1.0f, 1.0f), material.albedo, 0.45f);
@@ -582,13 +888,23 @@ float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, fl
 	return (specBase * albedoScaling) + clearCoatSpecular;
 }
 
-float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0))
+/**
+ * Translucency add dispatch: SKIN and SUBSURFACE both receive the material's
+ * authored transmittance response. No screen-space probes — light bleed is
+ * shaped purely by the ndotl-based term, so no false-thickness artifacts can
+ * be sourced from the G-buffer at all. `coord` keeps call-site signatures
+ * intact and is unused. `ao` / `shadow` only feed the cheat style.
+ */
+float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0), float ao = 1.0f, float shadow = 1.0f)
 {
 	[branch]
 	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
 	{
-		float3 transmittance = SubsurfaceTranslucency(material, N, L, V, coord);
-		return transmittance;
+#if SKIN_SSS_STYLE == 1
+		return SubsurfaceShadingCheatSkin(material, N, L, V, ao, shadow) + SubsurfaceShadingBacklitGlow(material, N, L, V);
+#else
+		return SubsurfaceShadingPennerSkin(material, N, L) + SubsurfaceShadingBacklitGlow(material, N, L, V);
+#endif
 	}
 	else
 		return 0;
@@ -614,7 +930,11 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float nh = saturate(dot(N, H));
 	float vh = saturate(dot(V, H));
 	float nv = abs(dot(N, V)) + 1e-5h;
-	float lv = saturate(dot(L, V));
+	float lv = dot(L, V);
+
+	// [de Carpentier 2017] Optional sphere-light highlight softening / specular
+	// AA; identity no-op when SPEC_LIGHT_SIN_ALPHA = 0 (constant-folded)
+	SphereMaxNoH(nl, lv, nv, SPEC_LIGHT_SIN_ALPHA, nh, vh);
 
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001);
 	roughness = FilterGeometricRoughness(roughness, N);
@@ -640,7 +960,18 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	}
 	else if (isSkin)
 	{
-		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L) * diffuseOcclusion;
+#if SKIN_SSS_STYLE == 1
+		// Cheat toolchain (UE SubsurfaceBxDF): standard wrapped diffuse here,
+		// the SSS/transmission terms are added by SubsurfaceShading
+		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+#else
+		float nlSkin = nl;
+#if SKIN_SHADOW_ROTATE == 1
+		// Pokey skin through cast shadows (UE mobile skin)
+		nlSkin = SkinRotatedNoL(nl, shadow);
+#endif
+		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L, nlSkin) * diffuseOcclusion;
+#endif
 	}
 	else
 	{
@@ -650,7 +981,17 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float3 diffuse = 0;
 	[branch]
 	if (isSkin)
-		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L) * diffuseOcclusion;
+	{
+#if SKIN_SSS_STYLE == 1
+		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+#else
+		float nlSkin = nl;
+#if SKIN_SHADOW_ROTATE == 1
+		nlSkin = SkinRotatedNoL(nl, shadow);
+#endif
+		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L, nlSkin) * diffuseOcclusion;
+#endif
+	}
 	else
 		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 #endif
@@ -696,6 +1037,14 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	float nl  = saturate(dot(N, Ls));
 	float vh  = saturate(dot(V, H));
 	float nv  = abs(dot(N, V)) + 1e-5h;
+
+	// [de Carpentier 2017] Optional sphere/area-light highlight softening;
+	// shaped by the specular direction Ls and a no-op when the knob is 0
+	float nlUnclamped = dot(N, Ls);
+	float vl = dot(Ls, V);
+	SphereMaxNoH(nlUnclamped, vl, nv, SPEC_LIGHT_SIN_ALPHA, nh, vh);
+	// Adopt the re-projected NoL (no-op when the knob is 0)
+	nl = saturate(max(nl, nlUnclamped));
 
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001);
 	roughness = FilterGeometricRoughness(roughness, N);

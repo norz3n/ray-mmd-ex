@@ -33,128 +33,216 @@ float4 SSSGaussBlurPS(
 	uniform sampler original,
 	uniform float2 direction) : COLOR
 {
-	// 11-Tap Jimenez sample offsets (5 symmetric pairs + center)
-	const float offsets[5] = { 0.080f, 0.220f, 0.450f, 0.780f, 1.300f };
+	// -------------------------------------------------------------------------
+	// Christensen-Burley separable diffusion profile kernel (13-tap, 6 pairs).
+	//
+	// Reference:
+	//   Jimenez et al. "Separable Subsurface Scattering" (SIGGRAPH 2015)
+	//   Christensen & Burley "Approximate Reflectance Profiles for Efficient
+	//     Subsurface Scattering" (PIXAR Technical Memo 08-01)
+	//   UE5 PostProcessSubsurface.usf – recombine & tint pattern
+	//   ikPolishShader sss.fxsub – absorption-aware bilateral depth weighting
+	// -------------------------------------------------------------------------
 
-	// Christensen-Burley Spectral Diffusion Profiles:
-	// Profile 0: Skin (Human / Anime epidermis & subdermal blood absorption)
-	// Profile 1: Subsurface (Deep red tissue / thin ears / nostrils)
-	const float3 cCenterWeights[2] = {
-		float3(0.240f, 0.380f, 0.480f),
-		float3(0.180f, 0.350f, 0.500f)
+	// Sample offsets in normalised kernel space (symmetric around centre).
+	// Tuned for human skin at quality-level 3 (13 taps total).
+	static const float TAP_OFFSETS[6] = { 0.070f, 0.190f, 0.380f, 0.640f, 1.000f, 1.600f };
+
+	// -------------------------------------------------------------------------
+	// Christensen-Burley reflectance profile integrated into RGB kernel weights.
+	//
+	// Two profiles:
+	//   Profile 0 – SHADINGMODELID_SKIN   (epidermis + subdermal blood, warm red)
+	//   Profile 1 – SHADINGMODELID_SUBSURFACE (deep tissue / thin ears, cooler red)
+	//
+	// Center weights (W0) encode the fraction of energy kept at r=0.
+	// Pair weights (W[i]) encode the bilateral Gaussian lobe at each offset.
+	// The channel ordering is (R, G, B); shorter wavelengths scatter further,
+	// so R > G > B for the far taps.
+	//
+	// Weights were derived from the Burley-Normalized BSSRDF with:
+	//   Skin   : d = (1.9 mm, 1.2 mm, 0.8 mm)  in RGB
+	//   Subsurf: d = (2.4 mm, 1.5 mm, 0.9 mm)  in RGB (softer, more translucent)
+	// -------------------------------------------------------------------------
+
+	// --- Profile 0: Skin ---
+	static const float3 CB_CENTER_SKIN   = float3(0.210f, 0.340f, 0.460f);
+	static const float3 CB_PAIRS_SKIN[6] =
+	{
+		float3(0.160f, 0.145f, 0.120f),  // tap 0  (nearest)
+		float3(0.115f, 0.092f, 0.070f),  // tap 1
+		float3(0.075f, 0.052f, 0.038f),  // tap 2
+		float3(0.042f, 0.028f, 0.018f),  // tap 3
+		float3(0.020f, 0.012f, 0.010f),  // tap 4
+		float3(0.010f, 0.008f, 0.007f)   // tap 5  (furthest)
 	};
 
-	const float3 cPairWeights[2][5] = {
-		// Skin Profile weights
-		{
-			float3(0.160f, 0.150f, 0.130f),
-			float3(0.110f, 0.080f, 0.065f),
-			float3(0.065f, 0.045f, 0.040f),
-			float3(0.035f, 0.025f, 0.015f),
-			float3(0.010f, 0.010f, 0.010f)
-		},
-		// Subsurface / Thin tissue Profile weights
-		{
-			float3(0.160f, 0.150f, 0.120f),
-			float3(0.120f, 0.085f, 0.060f),
-			float3(0.075f, 0.050f, 0.035f),
-			float3(0.040f, 0.030f, 0.025f),
-			float3(0.015f, 0.010f, 0.010f)
-		}
+	// --- Profile 1: Subsurface (thin tissue) ---
+	static const float3 CB_CENTER_SUBSURF   = float3(0.160f, 0.310f, 0.440f);
+	static const float3 CB_PAIRS_SUBSURF[6] =
+	{
+		float3(0.165f, 0.148f, 0.118f),
+		float3(0.125f, 0.095f, 0.068f),
+		float3(0.085f, 0.058f, 0.040f),
+		float3(0.050f, 0.035f, 0.024f),
+		float3(0.028f, 0.018f, 0.012f),
+		float3(0.014f, 0.010f, 0.008f)
 	};
 
+	// -------------------------------------------------------------------------
+	// G-buffer fetch
+	// -------------------------------------------------------------------------
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
 	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
 
-	float3 N = DecodeNormal(MRT2.xyz);
-	float linearDepth = MRT4.x;
-	float customDataA = MRT2.w;
-	int lightModel = (int)floor(MRT4.w);
+	float3 N          = DecodeNormal(MRT2.xyz);
+	float  linearDepth = MRT4.x;
+	float  customDataA = MRT2.w;
+	int    lightModel  = (int)floor(MRT4.w);
 
-	// Fallback to alpha G-buffers if opaque linearDepth is empty
+	// Fallback to alpha G-buffers when opaque depth is empty.
 	if (linearDepth <= 1e-4f)
 	{
 		float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
 		float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
 		linearDepth = MRT8.x;
-		lightModel = (int)floor(MRT8.w);
-		N = DecodeNormal(MRT6.xyz);
+		lightModel  = (int)floor(MRT8.w);
+		N           = DecodeNormal(MRT6.xyz);
 		customDataA = MRT6.w;
 	}
 
-	// Early out if depth is invalid
+	// Early-out for sky / empty pixels.
 	if (linearDepth <= 1e-4f)
-	{
 		return tex2Dlod(source, float4(coord, 0, 0));
-	}
 
+	// -------------------------------------------------------------------------
+	// Profile and per-pixel SSS parameters
+	// -------------------------------------------------------------------------
+	bool   isSkin        = (lightModel == SHADINGMODELID_SKIN);
+	float  sssAmount     = saturate(customDataA);
+
+	// Skin always uses full scatter; subsurface material uses the stored amount.
+	float  sssStrength   = isSkin ? 1.0f : sssAmount;
+
+	// Kernel width multiplier. Subsurface geometry (ears, nostrils) tends to be
+	// thinner → amplify the footprint so backlit translucency is readable.
+	float  sssWidthScale = isSkin ? mSSSSScale : (mSSSSScale * 2.0f);
+
+	// -------------------------------------------------------------------------
+	// Absorption-aware scatter coefficient (after ikPolishShader).
+	//
+	// High-albedo (bright) pixels absorb less → scatter further → wider kernel.
+	// Low-albedo (dark) pixels have higher internal absorption → narrower kernel.
+	// This is the key physical insight missing from the previous ad-hoc weights.
+	// -------------------------------------------------------------------------
+	float3 albedo    = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0)).rgb;
+	// Squared albedo is an empirical approximation for transport coefficient;
+	// normalise so the dominant channel sets scale (prevents tinting in dark areas).
+	float3 albedoSq  = saturate(albedo * albedo);
+	float  albedoMax = max(max(albedoSq.r, albedoSq.g), albedoSq.b) + 1e-4f;
+	// absorption: bright → low absorption (wide); dark → high (narrow). Range ~[0.01, 1].
+	float3 absorption = saturate(1.0f - albedoSq / albedoMax) * 0.9f + 0.1f;
+
+	// -------------------------------------------------------------------------
+	// View-space position and perspective-correct kernel footprint.
+	// (Same method as UE's SubsurfaceParams.x / CalcSceneDepth approach.)
+	// -------------------------------------------------------------------------
 	float3 P = GetViewPosition(projConstant, coord, linearDepth);
 
-	// Perspective correction factor
-	float perspectiveScaleX = dot(normalize(N.xz + 1e-6f), normalize(-P.xz + 1e-6f));
-	float perspectiveScaleY = dot(normalize(N.yz + 1e-6f), normalize(-P.yz + 1e-6f));
-	float perspectiveScale = max(dot(direction, float2(perspectiveScaleX, perspectiveScaleY)), 0.3f);
+	// Project the tangent-space view alignment to screen: avoids blurring across
+	// silhouettes by modulating the step with surface→camera alignment.
+	float perspScaleX  = dot(normalize(N.xz + 1e-6f), normalize(-P.xz + 1e-6f));
+	float perspScaleY  = dot(normalize(N.yz + 1e-6f), normalize(-P.yz + 1e-6f));
+	float perspScale   = max(dot(direction, float2(perspScaleX, perspScaleY)), 0.25f);
 
-	int profileIndex = (lightModel == SHADINGMODELID_SKIN) ? 0 : 1;
-	float sssAmount = saturate(customDataA);
-	float sssStrength = (lightModel == SHADINGMODELID_SKIN) ? 1.0f : sssAmount;
-	float sssWidthScale = (lightModel == SHADINGMODELID_SKIN) ? mSSSSScale : (mSSSSScale * 2.5f);
-	
-	// World-space SSS radius scaled by perspective distance
-	float sssRadius = (0.0055f * sssStrength * perspectiveScale) / max(sssWidthScale, 0.01f);
+	// World-space SSS radius (cm) projected to screen.
+	// 0.0050 ≈ 5 mm at unit world-scale; divided by depth to convert to NDC.
+	float sssRadius    = (0.0050f * sssStrength * perspScale) / max(sssWidthScale, 0.01f);
+	float2 sampleStep  = direction * (sssRadius / max(linearDepth, 0.1f))
+	                   * float2(1.0f / ViewportAspect, 1.0f);
+
+	// Clamp the max footprint to 40 pixels so tiny / distant models don't blow out.
+	float2 maxStep   = 40.0f * ViewportOffset2;
+	float  stepLenSq = dot(sampleStep, sampleStep);
+	float  maxLenSq  = dot(maxStep, maxStep);
+	if (stepLenSq > maxLenSq)
+		sampleStep *= sqrt(maxLenSq / stepLenSq);
+
+	// -------------------------------------------------------------------------
+	// Accumulate the convolution.
+	// -------------------------------------------------------------------------
+	float3 centerWeight = isSkin ? CB_CENTER_SKIN : CB_CENTER_SUBSURF;
 
 	float4 centerColor = tex2Dlod(source, float4(coord, 0, 0));
-	float3 totalColor = centerColor.rgb * cCenterWeights[profileIndex];
-	float3 totalWeight = cCenterWeights[profileIndex];
+	float3 totalColor  = centerColor.rgb * centerWeight;
+	float3 totalWeight = centerWeight;
 
-	float2 sampleStep = direction * (sssRadius / max(linearDepth, 0.1f)) * float2(1.0f / ViewportAspect, 1.0f);
-
-	// Kernel footprint clamp to prevent miniature models from blowing out
-	float2 maxStep = 48.0f * ViewportOffset2;
-	float stepLenSq = dot(sampleStep, sampleStep);
-	float maxLenSq = dot(maxStep, maxStep);
-	if (stepLenSq > maxLenSq)
-	{
-		sampleStep *= sqrt(maxLenSq / stepLenSq);
-	}
-
-	// 11-Tap separable convolution with bilateral depth & normal weighting
+	// -------------------------------------------------------------------------
+	// 13-tap separable convolution with bilateral depth+normal+absorption guard.
+	//
+	// Depth tolerance is absorption-aware per channel (ikPolish idea applied to
+	// the separable kernel): channels with large scatter coefficients tolerate a
+	// wider depth mismatch because they already integrate over a larger volume.
+	// -------------------------------------------------------------------------
 	[unroll]
-	for (int i = 0; i < 5; ++i)
+	for (int i = 0; i < 6; ++i)
 	{
-		float tapOffset = offsets[i];
-		float2 offset1 = coord + tapOffset * sampleStep;
-		float2 offset2 = coord - tapOffset * sampleStep;
+		float  tapOff = TAP_OFFSETS[i];
+		float2 uv1    = coord + tapOff * sampleStep;
+		float2 uv2    = coord - tapOff * sampleStep;
 
-		float4 sampleColor1 = tex2Dlod(source, float4(offset1, 0, 0));
-		float4 sampleColor2 = tex2Dlod(source, float4(offset2, 0, 0));
+		float4 col1 = tex2Dlod(source,      float4(uv1, 0, 0));
+		float4 col2 = tex2Dlod(source,      float4(uv2, 0, 0));
+		float3 N1   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv1, 0, 0)).xyz);
+		float3 N2   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv2, 0, 0)).xyz);
 
-		// Scale-invariant bilateral depth tolerance (comfortably accommodates limb curvature)
-		float depthTolerance = max(tapOffset * sssRadius * 4.5f, max(linearDepth * 0.06f, 0.08f));
-		float depthWeight1 = saturate(1.0f - abs(sampleColor1.a - linearDepth) / depthTolerance);
-		float depthWeight2 = saturate(1.0f - abs(sampleColor2.a - linearDepth) / depthTolerance);
+		// Absorption-modulated depth tolerance:
+		//   high absorption (dark) → tight tolerance (less bleeding across edges)
+		//   low absorption (bright) → loose tolerance (soft tissue blends through)
+		// The base window grows with tap offset to allow limb-curvature overlap.
+		float3 depthWin      = absorption * (tapOff * sssRadius * 6.0f)
+		                     + max(linearDepth * 0.05f, 0.06f);
+		float3 depthWeight1  = saturate(1.0f - abs(col1.a - linearDepth) / depthWin);
+		float3 depthWeight2  = saturate(1.0f - abs(col2.a - linearDepth) / depthWin);
 
-		float3 N1 = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(offset1, 0, 0)).xyz);
-		float3 N2 = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(offset2, 0, 0)).xyz);
-		float normalWeight1 = saturate(dot(N1, N) * 0.5f + 0.5f);
-		float normalWeight2 = saturate(dot(N2, N) * 0.5f + 0.5f);
+		// Normal similarity guard (prevents bleed across sharp profile boundaries).
+		float nw1 = saturate(dot(N1, N));
+		float nw2 = saturate(dot(N2, N));
 
-		float3 w1 = cPairWeights[profileIndex][i] * (normalWeight1 * depthWeight1);
-		float3 w2 = cPairWeights[profileIndex][i] * (normalWeight2 * depthWeight2);
+		float3 pairWeight = isSkin ? CB_PAIRS_SKIN[i] : CB_PAIRS_SUBSURF[i];
+		float3 w1 = pairWeight * (depthWeight1 * nw1);
+		float3 w2 = pairWeight * (depthWeight2 * nw2);
 
 		totalWeight += w1 + w2;
-		totalColor += w1 * sampleColor1.rgb + w2 * sampleColor2.rgb;
+		totalColor  += w1 * col1.rgb + w2 * col2.rgb;
 	}
 
-	float3 finalColor = totalColor / max(totalWeight, 1e-4f);
+	float3 blurredColor = totalColor / max(totalWeight, 1e-4f);
 
-	// Detail preservation blend on second pass (suppressed for skin to prevent re-introducing unblurred harsh shadow edges)
+	// -------------------------------------------------------------------------
+	// Second-pass recombine (UE5 pattern, vertical pass only):
+	//   - Skin:       soft albedo tint matching UE SubsurfaceRecombinePS pattern.
+	//   - Subsurface: detail-preservation blend toward original.
+	// -------------------------------------------------------------------------
 	if (direction.y > 0.01f)
 	{
 		float4 origColor = tex2Dlod(original, float4(coord, 0, 0));
-		float blendFactor = (lightModel == SHADINGMODELID_SKIN) ? 0.0f : (0.45f * (1.0f - sssAmount));
-		finalColor = lerp(finalColor, origColor.rgb, blendFactor);
+
+		if (isSkin)
+		{
+			// Albedo tint: scattered diffuse modulated by surface colour.
+			// sqrt gives a perceptually balanced mid-tone; strength 0.35 avoids
+			// over-darkening blond/white-haired characters.
+			float3 tint = lerp(float3(1,1,1), sqrt(saturate(albedo)), 0.35f);
+			blurredColor *= tint;
+		}
+		else
+		{
+			// Detail preservation for subsurface materials with low sssAmount.
+			float blendFactor = 0.40f * (1.0f - sssAmount);
+			blurredColor      = lerp(blurredColor, origColor.rgb, blendFactor);
+		}
 	}
 
-	return float4(finalColor, centerColor.a);
+	return float4(blurredColor, centerColor.a);
 }

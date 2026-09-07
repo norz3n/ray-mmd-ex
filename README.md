@@ -32,7 +32,7 @@ Reforge Exclusive Features (through v1.20.4) :
 * **Octahedral Normal Encoding**: compact and high-precision octahedral representation for unit normal vectors in G-buffer and math pipelines.
 
 **Global Illumination (SSGI 3.0)**
-* **Screen Space Global Illumination (SSGI 3.0)**: complete 3D cosine-weighted hemisphere raymarching engine inspired by UE5 Lumen SSRT. Replaces 2D screen-disk gather with branchless Duff 2017 orthonormal tangent space transform, stratified Halton (2, 3) sampling, per-pixel Interleaved Gradient Noise (IGN) rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and adaptive depth thickness gating.
+* **Screen Space Global Illumination (SSGI 3.0)**: complete 3D cosine-weighted hemisphere raymarching engine with screen-space short-range indirect tracing. Replaces 2D screen-disk gather with branchless Duff 2017 orthonormal tangent space transform, stratified Halton (2, 3) sampling, per-pixel Interleaved Gradient Noise (IGN) rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and adaptive depth thickness gating.
 * **Dyadic À-Trous Cross-Bilateral Denoising**: two-pass edge-preserving filter with $5 \times 5$ Karis 0.20 outlier rejection and tangent-plane distance weights (`BilateralPlaneWeight`) eliminating noise and blur artifacts while retaining sharp geometric contact edges.
 * **Indirect Multi-Bounce & Sky Radiance**: Jimenez-style albedo compensation, hemispherical Lambertian emission lobe, quadratic AO attenuation, and outdoor sky radiance fallback.
 * **Rough Specular GI**: cone-angle-controlled glossy indirect reflections with tunable debug morphs.
@@ -211,4 +211,61 @@ References :
 * Screen space glossy reflections \[[link](http://roar11.com/2015/07/screen-space-glossy-reflections/)\].
 * Parallax Occlusion Map \[[link](http://sunandblackcat.com/tipFullView.php?topicid=28)\].
 * Special-Case Materials Wetness \[[link](http://advances.realtimerendering.com/other/2016/naughty_dog/NaughtyDog_TechArt_Final.pdf)\]
+
+#### Material Response Library — `Shader/BRDF.fxsub`
+All BRDF/dispatch kernels actually implemented in the material shading unit, with their primary sources:
+
+| Algorithm (symbol) | Source |
+|---|---|
+| Schlick Fresnel `fresnelSchlick` (F0→F90 interpolation) | E. Schlick 1994, "An Inexpensive BRDF Model for Physically-Based Rendering"; F90-style saturate(50·F0) micro-occlusion from B. Karis 2013 SIGGRAPH shading course notes \[[link](https://blog.selfshadow.com/publications/s2013-shading-course/)\] |
+| Adobe F82 Fresnel `fresnelSchlickAdobeF82` (opt-in `BRDF_FRESNEL_TYPE 1`) | Kutz et al. 2021, "Novel aspects of the Adobe Standard Material", Sec. 2.3 (constants pre-folded for CosThetaMax = 1/7) |
+| Burley diffuse `BurleyBRDF` | B. Burley 2012, "Physically-Based Shading at Disney" |
+| Oren-Nayar diffuse `OrenNayarBRDF` | M. Oren & S. Nayar 1994 |
+| Energy-Preserving Oren-Nayar `EonBRDF` + Fujii FON 4th-order directional albedo polynomial | Portsmouth, Kutz & Hill, JCGT 2025 \[[link](https://jcgt.org/published/0014/01/01/)\] |
+| GGX / Trowbridge-Reitz distribution `SpecularBRDF_GGX` | B. Walter et al. 2007, "Microfacet Models for Refraction through Rough Surfaces" \[[link](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.html)\] |
+| Smith joint visibility `k`-form (Vis_SmithJointApprox) | E. Heitz 2014, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs" |
+| Multi-scattering specular energy compensation | V. Turquin 2018 (private notes) / M. Fdez-Aguera 2019, "A Multiple-Scattering Microfacet Model for Real-Time Image Based Lighting" |
+| Blinn-Phong specular `SpecularBRDF_Blinn` (glass) | J. Blinn 1977 |
+| Dual-lobe skin specular `DualLobeSkinSpecular` (widths/mix authorable via `SKIN_SPEC_LOBE*`) | dual-specular-lobe skin profile model (two-GGX mix), cf. J. Jimenez et al. 2015 "SEPARABLE SSS" and B. Penner 2011 (GPU Pro 2) |
+| Anisotropic GGX `SpecularBRDF_GGXAniso` (incl. shifted R/TRBT hair lobes) | Burley 2012; Kulla 2017 "Revisiting Physically Based Shading at Imageworks"; Heitz aniso Smith `Vis_SmithJointAniso` |
+| Sphere-light specular softening `SphereMaxNoH` (opt-in `SPEC_LIGHT_SIN_ALPHA`) | G. de Carpentier 2017, "Decima Engine: Advances in Lighting and AA" (largest-NoH over sphere solid angle + Newton iteration) || Charlie sheen cloth BRDF `ClothShading` (D_Charlie + Neubelt/Pettineo visibility or full `Vis_Charlie` exponential fit via `BRDF_CLOTH_VIS_CHARLIE`, cloth-DFG directional albedo) | F. Estevez & A. Kulla 2017, "Production Friendly Microfacet Sheen BRDF"; Neubelt & Pettineo 2013 "The Rendering Technologies of Destiny" |
+| ClearCoat two-layer specular + (1−Fc)² transmittance | two-layer clearcoat model per K. Weier et al.; (1−Fc)² double-interface attenuation after M. Ashikhmin & P. Shirley 2002 "A Anisotropic Phong Light (BRDF)" — standard layered-surface formulation |
+| Thin-film iridescence `ThinFilmIridescence` | Airy thin-film interference, per-wavelength OPD at 650/532/450 nm (cf. L. Belcour & P. Barla 2017, "A Practical Extendable BRDF for Layered Materials") |
+| Pre-integrated skin SSS `SubsurfaceShadingPreIntegratedSkin` | J. Jimenez et al. 2015, "Real-Time Separable Subsurface Scattering" (analytic polynomial of the LUT) |
+| Penner translucency add `SubsurfaceShadingPennerSkin` | B. Penner & A. Borshukov 2011, "Pre-Integrated Skin Shading", GPU Pro 2 |
+| Artist cheat SSS `SubsurfaceShadingCheatSkin` (opt-in `SKIN_SSS_STYLE 1`: WrappedDiffuse w=1/3 n=1.5, AO BackScatter, InScatter^12) | wrapped/translucent cheat shading as popularized in B. Karis' 2013 SIGGRAPH course notes and X. Álvarez screen-space subsurface conventions |
+| HSV-luminance-preserving transmittance hue shift `HueShiftTransmittance` | Beer-Lambert transmission-color grading; HSV codec by S. Hocevar / I. Quilez |
+| Backlit HG-phase glow `SubsurfaceShadingBacklitGlow` (refracted V + Henyey-Greenstein, opt-in) | Henyey-Greenstein forward-scattering phase evaluated at refraction-corrected view (L.G. Henyey & J.L. Greenstein 1941; thin-tissue transmission per J. Jimenez et al. 2010 "Real-Time Realistic Skin Translucency") |
+| Shadow-rotated terminator `SkinRotatedNoL` (opt-in `SKIN_SHADOW_ROTATE`) | shadow-rotated NoL for skin through cast shadows, community PS3-era mobile skin technique |
+| Specular micro-occlusion `ComputeSpecularMicroOcclusion` / ambient aperture occlusion | saturate(50·F0) clamp from B. Karis 2013; aperture-based ambient occlusion |
+| Toon ramps, YIQ hue rotation, community shadow grading (`ToonBasedShading`, `CelShading`, `ToonShadowGrade`) | HAToon2 / PAToon2, M4Toon2, Jashin Toon, T_ToonShader; YIQ NTSC transform |
+| Geometric specular roughness filtration `FilterGeometricRoughness` | D. Young 2015 "specAA" / LEAN/CLEAN-style geometric filtering |
+
+#### Skin SSS Separable Blur — `Shader/PostProcessScattering.fxsub`
+* **Separable Screen-Space SSS (13-tap two-pass)**: horizontal + vertical convolution of the SSR-denoised diffusion field with a front-to-back modulated footprint and perspective-aware step — J. Jimenez et al. 2015, "Separable Subsurface Scattering" \[[link](https://www.iryoku.com/sssss/)\].
+* **Christensen–Burley Approximate Reflectance Profiles**: 13-tap RGB kernel weights pre-integrated from the Burley-Normalized BSSRDF for two profiles (skin d=(1.9, 1.2, 0.8) mm; subsurface d=(2.4, 1.5, 0.9) mm) — P. Christensen & B. Burley, "Approximate Reflectance Profiles for Efficient Subsurface Scattering", Pixar Technical Memo 15-04 \[[link](https://graphics.pixar.com/library/ApproxBSSRDF/)\].
+* **Deferred SSS recombine & tint**: second-pass albedo tint (`sqrt(saturate(albedo))`, strength 0.35) and detail-preservation blend for low-scatter subsurface materials — the industry-standard recombine pattern from the separable SSS screen-space pipeline.
+* **Absorption-aware bilateral edge guard**: per-channel depth tolerance modulated by the squared-albedo transport approximation so bright pixels scatter wider and dark pixels cut bleeding — adapted from ikeno's `ikPolishShader` sss.fxsub.
+
+#### Screen-Space Global Illumination — `Shader/SSGI/`
+Every algorithm named in the SSGI module comments (`SSGI_Trace / SSGI_Filter / SSGI_Resolve / SSGI_Common`), mapped to its primary source:
+
+| Algorithm (location) | Source |
+|---|---|
+| Low-ray-count cosine-weighted hemisphere raymarching with radiance gather (`SSGI_Trace.fxsub`) | Monte Carlo cosine-weighted hemisphere sampling; screen-space short-range diffuse tracing following the SSRT-style raymarching introduced in modern deferred engines (concept per McGuire & Mara 2014 screen-space ray tracing) |
+| Branchless orthonormal tangent basis `BuildOrthonormalBasis` (`SSGI_Common.fxsub:64`) | T. Duff et al. 2017, "Building an Orthonormal Basis, Revisited", JCGT \[[link](https://jcgt.org/published/0006/01/01/)\] |
+| Interleaved Gradient Noise jitter `InterleavedGradientNoise` (`SSGI_Trace.fxsub:82`) | J. Jimenez 2014, "Next Generation Post Processing in Call of Duty: Advanced Warfare", SIGGRAPH course |
+| Halton (2, 3) low-discrepancy stratification `Halton2` / `Halton3` (`SSGI_Common.fxsub:78–109`) | J. H. Halton 1964, "Algorithm 65: Implement of the Radical-Inverse Quasi-Random Point Sequence" |
+| Branchless viewport ray clipping `ClipRayToScreenEdge` (`SSGI_Common.fxsub:115`) | ratio-based ray-minus screen-edge intersection per M. McGuire & M. Mara 2017, "Efficient GPU Screen-Space Ray Tracing" \[[link](https://jcgt.org/published/0003/03/04/)\]. |
+| Adaptive depth-thickness visibility gating `ComputeThicknessWeight` (`SSGI_Common.fxsub:127`) | smoothstep thickness gating used by screen-space ray-traced denoisers (cf. E. Heitz et al. 2016, "Spatiotemporal Variance-Guided Filtering, SVGF") |
+| Radiance outlier rejection + Karis luminance weighting (`SSGI_Filter.fxsub:66`) | B. Karis 2014, "Next Generation Post Processing in Call of Duty: Advanced Warfare" (SIGGRAPH Advances course) |
+| Cross-bilateral edge stops (`BilateralCommon.fxsub`: plane distance, depth, normal similarity, Gaussian spatial falloff) | C. Tomasi & R. Manduchi 1998, "Bilateral Filtering for Gray and Color Images"; tangent-plane distance weighting standard in screen-space GI denoisers |
+| Separable À-Trous wavelet blur with dyadic stride 1→2 (`SSGIBlurPS`) | à-trous wavelet transform (P. Dutilleux 1990), modern usage per SVGF (Heitz et al. 2016) "Spatiotemporal variance-guided filtering" |
+| Cosine-weighted hemisphere Monte Carlo sampling | cosinelobe importance sampling with Shirley-concentric mapping (M. Shirley & K. Chiu 1997, "A Low Distortion Map Between Disk and Square") |
+| Multi-bounce occlusion response (AO² quadratic crevice absorption) + albedo-compensated multi-bounce `multiBounce` (`SSGI_Resolve.fxsub:38–91`) | J. Jimenez et al. 2016 GTAO multi-bounce approximation \[[link](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_一提.pdf)\] |
+| Reinhard photometric compression for skin reception (`SSGI_Resolve.fxsub:62`) | E. Reinhard et al. 2002, "Photographic Tone Reproduction for Digital Imaging" |
+| Rough indirect specular slice via Fresnel(F0)-weighted gathered irradiance (`SSGI_Resolve.fxsub:93–103`) | rough-indirect-specular from diffuse irradiance approximation (community/GDC-proven approach used alongside mirror-gloss SSR) |
+| Checkerboard-YCbCr 2-tap sky radiance decode `SampleSkyRadiance` (`SSGI_Trace.fxsub:24–33`) | 4:2:0-style chroma-subsampled checkerboard packing (native ray-mmd `EnvLightMap` encoding) |
+| Sky/IBL seamless fallback for escaped rays + distance/vignetting falloff | standard screen-space raymarching fallback (by effect scope in the IBL unit) |
+
 * (And many more from the original development team...)
