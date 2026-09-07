@@ -115,6 +115,22 @@ float4 SSSGaussBlurPS(
 	if (linearDepth <= 1e-4f)
 		return tex2Dlod(source, float4(coord, 0, 0));
 
+	float3 albedo = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0)).rgb;
+
+#if SSSS_TEXSPACE
+	// Texture-space skin pixels bypass this screen-space diffusion: their UV
+	// base was already convolved in texture space and injected deferred-side
+	// (ShadingOpacityPS), so a second screen-space pass would double the
+	// scattering. The recombine tint below still applies.
+	float2 sssUVCoord = float2(MRT4.y - 1.0f, frac(MRT4.w) * (256.0f / 255.0f));
+	float  sssHasUV   = (lightModel == SHADINGMODELID_SKIN && MRT4.y > 0.5f && MRT4.y < 2.001f)
+	                  ? step(0.05f, tex2Dlod(SSSUVLightMapSamp, float4(sssUVCoord, 0, 0)).a)
+	                  : 0;
+	float3 sssUVAlbedo = tex2Dlod(SSSUVAlbedoMapSamp, float4(sssUVCoord, 0, 0)).rgb;
+	float3 sssUVErr = abs(sssUVAlbedo - albedo);
+	sssHasUV *= (sssUVErr.r + sssUVErr.g + sssUVErr.b < 0.06f) ? 1.0f : 0.0f;
+#endif
+
 	// -------------------------------------------------------------------------
 	// Profile and per-pixel SSS parameters
 	// -------------------------------------------------------------------------
@@ -135,7 +151,6 @@ float4 SSSGaussBlurPS(
 	// Low-albedo (dark) pixels have higher internal absorption -> narrower kernel.
 	// This is the key physical insight missing from the previous ad-hoc weights.
 	// -------------------------------------------------------------------------
-	float3 albedo    = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0)).rgb;
 	// Squared albedo is an empirical approximation for transport coefficient;
 	// normalise so the dominant channel sets scale (prevents tinting in dark areas).
 	float3 albedoSq  = saturate(albedo * albedo);
@@ -184,40 +199,49 @@ float4 SSSGaussBlurPS(
 	// the separable kernel): channels with large scatter coefficients tolerate a
 	// wider depth mismatch because they already integrate over a larger volume.
 	// -------------------------------------------------------------------------
-	[unroll]
-	for (int i = 0; i < 6; ++i)
+#if SSSS_TEXSPACE
+	if (sssHasUV < 0.5f)
+#endif
 	{
-		float  tapOff = TAP_OFFSETS[i];
-		float2 uv1    = coord + tapOff * sampleStep;
-		float2 uv2    = coord - tapOff * sampleStep;
+		[unroll]
+		for (int i = 0; i < 6; ++i)
+		{
+			float  tapOff = TAP_OFFSETS[i];
+			float2 uv1    = coord + tapOff * sampleStep;
+			float2 uv2    = coord - tapOff * sampleStep;
 
-		float4 col1 = tex2Dlod(source,      float4(uv1, 0, 0));
-		float4 col2 = tex2Dlod(source,      float4(uv2, 0, 0));
-		float3 N1   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv1, 0, 0)).xyz);
-		float3 N2   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv2, 0, 0)).xyz);
+			float4 col1 = tex2Dlod(source,      float4(uv1, 0, 0));
+			float4 col2 = tex2Dlod(source,      float4(uv2, 0, 0));
+			float3 N1   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv1, 0, 0)).xyz);
+			float3 N2   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv2, 0, 0)).xyz);
 
-		// Absorption-modulated depth tolerance:
-		//   high absorption (dark) -> tight tolerance (less bleeding across edges)
-		//   low absorption (bright) -> loose tolerance (soft tissue blends through)
-		// The base window grows with tap offset to allow limb-curvature overlap.
-		float3 depthWin      = absorption * (tapOff * sssRadius * 6.0f)
-		                     + max(linearDepth * 0.05f, 0.06f);
-		float3 depthWeight1  = saturate(1.0f - abs(col1.a - linearDepth) / depthWin);
-		float3 depthWeight2  = saturate(1.0f - abs(col2.a - linearDepth) / depthWin);
+			// Absorption-modulated depth tolerance:
+			//   high absorption (dark) -> tight tolerance (less bleeding across edges)
+			//   low absorption (bright) -> loose tolerance (soft tissue blends through)
+			// The base window grows with tap offset to allow limb-curvature overlap.
+			float3 depthWin      = absorption * (tapOff * sssRadius * 6.0f)
+			                     + max(linearDepth * 0.05f, 0.06f);
+			float3 depthWeight1  = saturate(1.0f - abs(col1.a - linearDepth) / depthWin);
+			float3 depthWeight2  = saturate(1.0f - abs(col2.a - linearDepth) / depthWin);
 
-		// Normal similarity guard (prevents bleed across sharp profile boundaries).
-		float nw1 = saturate(dot(N1, N));
-		float nw2 = saturate(dot(N2, N));
+			// Normal similarity guard (prevents bleed across sharp profile boundaries).
+			float nw1 = saturate(dot(N1, N));
+			float nw2 = saturate(dot(N2, N));
 
-		float3 pairWeight = isSkin ? CB_PAIRS_SKIN[i] : CB_PAIRS_SUBSURF[i];
-		float3 w1 = pairWeight * (depthWeight1 * nw1);
-		float3 w2 = pairWeight * (depthWeight2 * nw2);
+			float3 pairWeight = isSkin ? CB_PAIRS_SKIN[i] : CB_PAIRS_SUBSURF[i];
+			float3 w1 = pairWeight * (depthWeight1 * nw1);
+			float3 w2 = pairWeight * (depthWeight2 * nw2);
 
-		totalWeight += w1 + w2;
-		totalColor  += w1 * col1.rgb + w2 * col2.rgb;
+			totalWeight += w1 + w2;
+			totalColor  += w1 * col1.rgb + w2 * col2.rgb;
+		}
 	}
 
+#if SSSS_TEXSPACE
+	float3 blurredColor = (sssHasUV > 0.5f) ? centerColor.rgb : (totalColor / max(totalWeight, 1e-4f));
+#else
 	float3 blurredColor = totalColor / max(totalWeight, 1e-4f);
+#endif
 
 	// -------------------------------------------------------------------------
 	// Second-pass recombine (UE5 pattern, vertical pass only):
@@ -246,3 +270,62 @@ float4 SSSGaussBlurPS(
 
 	return float4(blurredColor, centerColor.a);
 }
+
+#if SSSS_TEXSPACE
+// -------------------------------------------------------------------------
+// Texture-space SSS convolution (13-tap Christensen-Burley profile).
+//
+// Runs once per frame over the UV-wrapped skin irradiance field with WRAP
+// addressing, before ShadingOpacity consumes it. The kernel radius is defined
+// in UV texels (SSSS+/SSSS- morphs widen/narrow it), so scatter stays constant
+// in texture space regardless of camera distance or model scale. Coverage
+// stored in alpha weights the normalization; empty atlas regions contribute
+// nothing and keep a coverage of 0 so the deferred albedo gate can reject them.
+//
+// Reference: J. Jimenez et al. 2015 "Separable Subsurface Scattering";
+// P. Christensen & B. Burley "Approximate Reflectance Profiles", Pixar TM 15-04;
+// D'Eon et al. 2007 texture-space diffusion (GPU Gems 3, ch. 14).
+// -------------------------------------------------------------------------
+float4 SSSUVSpaceBlurPS(
+	in float2 coord : TEXCOORD0,
+	uniform sampler source,
+	uniform float2 direction) : COLOR
+{
+	static const float UV_TAP_OFFSETS[6] = { 0.070f, 0.190f, 0.380f, 0.640f, 1.000f, 1.600f };
+	static const float3 UV_CENTER = float3(0.210f, 0.340f, 0.460f);
+	static const float3 UV_PAIRS[6] =
+	{
+		float3(0.160f, 0.145f, 0.120f),
+		float3(0.115f, 0.092f, 0.070f),
+		float3(0.075f, 0.052f, 0.038f),
+		float3(0.042f, 0.028f, 0.018f),
+		float3(0.020f, 0.012f, 0.010f),
+		float3(0.010f, 0.008f, 0.007f)
+	};
+
+	float4 center = tex2Dlod(source, float4(coord, 0, 0));
+	float3 totalColor  = center.rgb * UV_CENTER;
+	float3 totalWeight = UV_CENTER;
+
+	// 0.8 texels at the neutral mSSSSScale (0.04) -> ~20 texel base radius;
+	// the far tap reaches ~32 texels. SSSS+ (0.02) doubles the footprint.
+	float2 sampleStep = direction * (0.8f / max(mSSSSScale, 0.01f)) * ViewportOffset2;
+
+	[unroll]
+	for (int i = 0; i < 6; ++i)
+	{
+		float  tapOff = UV_TAP_OFFSETS[i];
+		float4 col1 = tex2Dlod(source, float4(coord + tapOff * sampleStep, 0, 0));
+		float4 col2 = tex2Dlod(source, float4(coord - tapOff * sampleStep, 0, 0));
+
+		float3 w1 = UV_PAIRS[i] * col1.a;
+		float3 w2 = UV_PAIRS[i] * col2.a;
+
+		totalWeight += w1 + w2;
+		totalColor  += w1 * col1.rgb + w2 * col2.rgb;
+	}
+
+	float3 blurred = totalColor / max(totalWeight, 1e-4f);
+	return float4(blurred, center.a);
+}
+#endif

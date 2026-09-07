@@ -116,7 +116,7 @@ float3 ComputeWaterCaustics(float3 worldPos, float3 normalVS, float shadow, floa
 }
 #endif
 
-void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, out float3 diffuse, out float3 specular)
+void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, out float3 diffuse, out float3 specular, float4 uvSunBase = float4(0, 0, 0, 0))
 {
 	float shadow = 1;
 #if SUN_SHADOW_QUALITY
@@ -144,10 +144,23 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	float shadowTerm = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE) ? shadow : min(shadow, saturate(dot(material.normal, L) * 4));
 	float2x3 energy = SurfaceEnergy(material, material.normal, L, V, shadowTerm);
 #endif
+	float3 baseDiffuse = energy[0];
+#if SSSS_TEXSPACE
+	// Texture-space skin: the Lambert/EON base is replaced by the UV-diffused
+	// field (its shadow and terminator were already convolved in texture
+	// space); view-dependent factors stay per-pixel. The style SSS/transmission
+	// add below remains untouched.
+	[branch]
+	if (uvSunBase.w > 0.5f)
+	{
+		float uvOcc = ComputeAmbientMicroOcclusion(saturate(dot(material.normal, L)), material.visibility) * shadow;
+		baseDiffuse = uvSunBase.rgb * lerp(1.0f, uvOcc, SKIN_AO_STRENGTH);
+	}
+#endif
 	float3 subsurface = SubsurfaceShading(material, material.normal, L, V, coord, material.visibility, shadow);
 
 	bool isSkinMat = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	diffuse = (energy[0] + subsurface * (isSkinMat ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow)) * lightColor;
+	diffuse = (baseDiffuse + subsurface * (isSkinMat ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow)) * lightColor;
 
 #if WATER_CAUSTICS_ENABLE
 	if (material.lightModel != SHADINGMODELID_GLASS)
@@ -292,8 +305,24 @@ void ShadingOpacityPS(
 #endif
 
 #if SUN_LIGHT_ENABLE
+	float3 uvSunBase = 0;
+	float uvSunValid = 0;
+#if SSSS_QUALITY && SSSS_TEXSPACE && SUN_SHADOW_QUALITY
+	// Texture-space SSS: sample the convolved UV field at the packed skin UV
+	// and validate it against this pixel's raw G-buffer albedo. Stale or
+	// colliding islands (other models, changed materials) fail the match and
+	// keep the baseline screen-space base.
+	if (material.hasUVSSS > 0.5f)
+	{
+		float4 uvField = tex2Dlod(SSSUVLightMapSamp, float4(material.uvSSS, 0, 0));
+		float3 uvAlbedo = tex2Dlod(SSSUVAlbedoMapSamp, float4(material.uvSSS, 0, 0)).rgb;
+		float albedoErr = abs(uvAlbedo.r - MRT1.r) + abs(uvAlbedo.g - MRT1.g) + abs(uvAlbedo.b - MRT1.b);
+		uvSunValid = (uvField.a > 0.05f && albedoErr < 0.06f) ? 1.0f : 0.0f;
+		uvSunBase = uvField.rgb;
+	}
+#endif
 	float3 sunDiffuse, sunSpecular;
-	ShadingMaterial(material, V, L, coord, sunDiffuse, sunSpecular);
+	ShadingMaterial(material, V, L, coord, sunDiffuse, sunSpecular, float4(uvSunBase, uvSunValid));
 	diffuse += sunDiffuse;
 	specular += sunSpecular;
 #endif

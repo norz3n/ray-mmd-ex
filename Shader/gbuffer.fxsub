@@ -45,6 +45,8 @@ struct MaterialParam
 	float customDataA;
 	float3 customDataB;
 	float linearDepth;
+	float2 uvSSS;
+	float hasUVSSS;
 	int lightModel;
 };
 
@@ -140,6 +142,21 @@ void DecodeGbuffer(float4 buffer1, float4 buffer2, float4 buffer3, float4 buffer
 	material.linearDepth = buffer4.x;
 	material.visibility = buffer4.z;
 	material.lightModel = (int)floor(buffer4.w);
+
+	// Texture-space SSS coordinate: the material stage packs the final mesh UV
+	// into the free skin slots of buffer4 (y = 1 + u; the fractional alpha slot
+	// of an always-opaque skin pixel carries v at ~1/1020 precision). EMISSIVE
+	// pixels keep their emissiveIntensity in .y and never receive the pack.
+	material.uvSSS = 0;
+	material.hasUVSSS = 0;
+#if SSSS_TEXSPACE
+	if (material.lightModel == SHADINGMODELID_SKIN &&
+		buffer4.y > 0.5f && buffer4.y < 2.001f)
+	{
+		material.uvSSS = float2(buffer4.y - 1.0f, frac(buffer4.w) * (256.0f / 255.0f));
+		material.hasUVSSS = 1;
+	}
+#endif
 
 	if (material.lightModel >= SHADINGMODELID_MASK)
 		material.lightModel = SHADINGMODELID_DEFAULT;

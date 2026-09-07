@@ -365,6 +365,14 @@ technique DeferredLighting<
 	"RenderColorTarget=OutlineTempMap; Pass=EdgeNeighborhoodBlending;"
 #endif
 
+#if SSSS_QUALITY && SSSS_TEXSPACE
+	// Texture-space SSS field: convolve the UV-wrapped skin irradiance once
+	// before the deferred composite consumes it (WRAP addressing, coverage-
+	// weighted kernel).
+	"RenderColorTarget=SSSUVLightTemp; Pass=SSSSTexSpaceUVBlurX;"
+	"RenderColorTarget=SSSUVLightMap;  Pass=SSSSTexSpaceUVBlurY;"
+#endif
+
 #if SSSS_QUALITY
 	"RenderColorTarget0=ShadingMapTemp;"
 	"RenderColorTarget1=ShadingMapTempSpecular;"
@@ -682,6 +690,20 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 SSSGaussBlurVS();
 		PixelShader  = compile ps_3_0 SSSGaussBlurPS(ShadingMapSamp, ShadingMapTempSamp, float2(0.0, 1.0));
 	}
+#if SSSS_TEXSPACE
+	pass SSSSTexSpaceUVBlurX<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSSUVSpaceBlurPS(SSSUVLightMapSamp, float2(1.0, 0.0));
+	}
+	pass SSSSTexSpaceUVBlurY<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSSUVSpaceBlurPS(SSSUVLightMapSampTemp, float2(0.0, 1.0));
+	}
+#endif
 	pass ShadingOpacityAlbedo<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

@@ -110,6 +110,14 @@ static float LightIntensity = lerp(emissiveIntensityMin, emissiveIntensityMax, m
 
 #define ALPHA_THRESHOLD 0.5
 
+// Texture-space SSS switch for the material stage. The material shader cannot
+// see ray.conf, so this mirrors ray.conf's SSSS_TEXSPACE; mismatches are safe
+// (the deferred stage falls back to screen-space SSSS when the UV field or the
+// packed G-buffer UV is missing).
+#ifndef SSSS_TEXSPACE
+#define SSSS_TEXSPACE 1
+#endif
+
 shared texture Gbuffer2RT: RENDERCOLORTARGET;
 shared texture Gbuffer3RT: RENDERCOLORTARGET;
 shared texture Gbuffer4RT: RENDERCOLORTARGET;
@@ -1121,7 +1129,7 @@ float ShininessToSmoothness(float spec)
 	return 1.0f - pow(max(0, 2.0 / (spec + 2)), 0.125);
 }
 
-GbufferParam EncodeGbuffer(MaterialParam material, float linearDepth)
+GbufferParam EncodeGbuffer(MaterialParam material, float linearDepth, float2 texUV = float2(0, 0), bool packUV = false)
 {
 	GbufferParam gbuffer;
 	gbuffer.buffer1.xyz = material.albedo * (1 - material.metalness);
@@ -1153,6 +1161,19 @@ GbufferParam EncodeGbuffer(MaterialParam material, float linearDepth)
 
 	gbuffer.buffer4 = float4(linearDepth, material.emissiveIntensity, material.visibility, material.lightModel);
 	gbuffer.buffer4.w += material.alpha * MAX_FRACTIONAL_8_BIT;
+
+	// Texture-space SSS: pack the final mesh UV into the free slots of an
+	// always-opaque skin pixel. y = 1 + u (16F, sentinel "y > 0.5" doubles as
+	// the has-UV flag); the constant alpha fraction (1.0) of an opaque pixel
+	// is replaced by v (round-trips through the existing frac decode at
+	// ~1/2048 precision). EMISSIVE pixels keep their emissiveIntensity in .y.
+#if SSSS_TEXSPACE
+	if (packUV && material.lightModel == SHADINGMODELID_SKIN)
+	{
+		gbuffer.buffer4.y = 1.0f + frac(texUV.x);
+		gbuffer.buffer4.w = material.lightModel + MAX_FRACTIONAL_8_BIT * frac(texUV.y);
+	}
+#endif
 
 	return gbuffer;
 }
@@ -2193,7 +2214,7 @@ GbufferParam MaterialPS(
 	material.lightModel = GetLightMode(material);
 	material.alpha = 1;
 
-	return EncodeGbuffer(material, worldPos.w);
+	return EncodeGbuffer(material, worldPos.w, coord0, true);
 }
 
 GbufferParam Material2PS(
@@ -2290,6 +2311,11 @@ GbufferParam Material2PS(
 	return EncodeGbuffer(material, worldPos.w);
 }
 
+#if CUSTOM_ENABLE == 1
+// Skin family: the object-stage technique renders the G-buffer and then the
+// UV-space SSS irradiance pass (Shader/SSSUVSpace.fxsub).
+#include "../../../shader/SSSUVSpace.fxsub"
+#else
 #define OBJECT_TEC(name, mmdpass)\
 	technique name<string MMDPass = mmdpass;\
 	string Script =\
@@ -2315,6 +2341,7 @@ GbufferParam Material2PS(
 			PixelShader  = compile ps_3_0 Material2PS();\
 		}\
 	}
+#endif
 
 OBJECT_TEC(MainTec0, "object")
 OBJECT_TEC(MainTecBS0, "object_ss")
