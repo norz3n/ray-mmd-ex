@@ -77,7 +77,7 @@ float4 SSGIOutlierRejectPS(
 }
 
 /**
- * Separable À-Trous Cross-Bilateral Filter Pass.
+ * Separable A-Trous Cross-Bilateral Filter Pass.
  * Expands step footprint across stages (stride 1 -> stride 2) to reconstruct smooth low-frequency GI
  * while strictly preserving normal creases, geometric silhouettes, and depth contours.
  */

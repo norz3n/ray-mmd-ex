@@ -137,13 +137,11 @@ float mDbgSSGIIntensity2 : CONTROLOBJECT<string name="DebugController"; string i
 float mDbgSSGIConeAngle2 : CONTROLOBJECT<string name="DebugController"; string item = "SSGIConeAngle";>;
 float mDbgSSGIBias2      : CONTROLOBJECT<string name="DebugController"; string item = "SSGIBias";>;
 
-float mCtrlSSGIIntensity : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSGIIntensity";>;
-float mCtrlSSGIConeAngle : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSGIConeAngle";>;
-float mCtrlSSGIBias      : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSGIBias";>;
-
-static float mDbgSSGIIntensity = max(mDbgSSGIIntensity1, max(mDbgSSGIIntensity2, mCtrlSSGIIntensity));
-static float mDbgSSGIConeAngle = max(mDbgSSGIConeAngle1, max(mDbgSSGIConeAngle2, mCtrlSSGIConeAngle));
-static float mDbgSSGIBias      = max(mDbgSSGIBias1,      max(mDbgSSGIBias2,      mCtrlSSGIBias));
+// SSGI intensity/cone/bias knobs live on DebugController.pmx only;
+// ray_controller.pmx has no SSGI morphs, so no bindings here.
+static float mDbgSSGIIntensity = max(mDbgSSGIIntensity1, mDbgSSGIIntensity2);
+static float mDbgSSGIConeAngle = max(mDbgSSGIConeAngle1, mDbgSSGIConeAngle2);
+static float mDbgSSGIBias      = max(mDbgSSGIBias1,      mDbgSSGIBias2);
 
 static float mSSAOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSAOP), 0, mSSAOM);
 static float mSSAORadius = lerp(lerp(1.0, 2.0, mSSAORadiusP), 0.5, mSSAORadiusM);
@@ -244,7 +242,7 @@ static float mCausticsDispScale  = lerp(lerp(1.0f, 3.0f, mCstDispersionP), 0.0f,
 #endif
 
 #ifndef BOKEH_MODE
-#	define BOKEH_MODE BOKEH_QUALITY
+#	define BOKEH_MODE 0
 #endif
 
 #if BOKEH_MODE == 1
@@ -509,10 +507,8 @@ technique DeferredLighting<
 #endif
 
 #if AA_QUALITY == 0
-#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=HDRTonemapping;"
-#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=HDRTonemapping;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=HDRTonemapping;"
 #endif
@@ -521,10 +517,8 @@ technique DeferredLighting<
 #endif
 
 #if AA_QUALITY == 1
-#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=FXAA;"
-#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=FXAA;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=FXAA;"
 #endif
@@ -533,10 +527,8 @@ technique DeferredLighting<
 #if AA_QUALITY == 2 || AA_QUALITY == 3
 	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection;"
 	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation;"
-#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlending;"
-#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlending;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlending;"
 #endif
@@ -549,10 +541,8 @@ technique DeferredLighting<
 
 	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection2x;"
 	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation2x;"
-#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlendingFinal;"
-#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlendingFinal;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlendingFinal;"
 #endif
@@ -561,20 +551,16 @@ technique DeferredLighting<
 #if AA_QUALITY == 6
 	"RenderColorTarget0=TAAHistoryMap; RenderColorTarget1=TAADepthMap; Pass=TAAPass;"
 	"RenderColorTarget1=;"
-#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=TAAFinal;"
-#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=TAAFinal;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=TAAFinal;"
 #endif
 #endif
 
 #if AA_QUALITY == 7
-#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=GDLAAPass;"
-#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=GDLAAPass;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=GDLAAPass;"
 #endif
@@ -775,7 +761,7 @@ technique DeferredLighting<
 	pass SSR_BlurY2<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 2);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(float2(0.0f, ViewportOffset2.y * 2));
 		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX2SampTemp, SSRBlurStepY2);
 	}
 	pass SSR_BlurX3<string Script= "Draw=Buffer;";>{
@@ -787,7 +773,7 @@ technique DeferredLighting<
 	pass SSR_BlurY3<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 4);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(float2(0.0f, ViewportOffset2.y * 4));
 		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX3SampTemp, SSRBlurStepY3);
 	}
 	pass SSR_BlurX4<string Script= "Draw=Buffer;";>{
@@ -799,7 +785,7 @@ technique DeferredLighting<
 	pass SSR_BlurY4<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 8);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(float2(0.0f, ViewportOffset2.y * 8));
 		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX4SampTemp, SSRBlurStepY4);
 	}
 	pass SSR_Resolve<string Script= "Draw=Buffer;";>{
@@ -1317,21 +1303,14 @@ technique DeferredLighting<
 	}
 #endif
 #if POST_MOTION_BLUR_ENABLE
-#if POST_SHARPEN_ENABLE
+	// Input is always the AA/tonemap output in ShadingMapTemp2 (clean ping-pong:
+	// the upstream "single consumer writes into the buffer it samples" case is gone)
 	pass PostProcessMotionBlur<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 PostProcessMotionBlurPS(ShadingMapTemp2Samp);
 	}
-#else
-	pass PostProcessMotionBlur<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 PostProcessMotionBlurPS(ShadingMapTempSamp);
-	}
-#endif
 #endif
 #if AA_QUALITY == 6
 	pass TAAFinal<string Script= "Draw=Buffer;";>{
@@ -1354,7 +1333,11 @@ technique DeferredLighting<
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+#if POST_MOTION_BLUR_ENABLE
 		PixelShader  = compile ps_3_0 PostProcessSharpenPS(ShadingMapTempSamp, ViewportOffset2);
+#else
+		PixelShader  = compile ps_3_0 PostProcessSharpenPS(ShadingMapTemp2Samp, ViewportOffset2);
+#endif
 	}
 #endif
 }

@@ -1,3 +1,6 @@
+// Alias of main_ex_alpha.fx, kept as a separate entry point for existing MME
+// project files. The upstream variants diverged only by the matcap layer and
+// per-file alphaThreshold; both were unified in v1.15 (matcap removed, cutout = 0.5).
 #define ALPHA_MAP_FROM 3
 #define ALPHA_MAP_UV_FLIP 0
 #define ALPHA_MAP_SWIZZLE 3

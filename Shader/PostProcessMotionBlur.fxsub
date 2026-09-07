@@ -29,9 +29,12 @@ float4 PostProcessMotionBlurPS(in float2 uv : TEXCOORD0, uniform sampler2D sourc
 	}
 #endif
 	
-	// Clamp velocity to prevent massive smearing during teleports/camera cuts
+	// Clamp velocity to prevent massive smearing during teleports/camera cuts.
+	// Measure the length in isotropic screen units (x in height fractions) so the
+	// limit is not axis-dependent on non-square viewports, but keep the raw UV
+	// velocity for sampling.
 	float maxVelocity = 0.05f; // 5% of screen width
-	float velocityLen = length(velocity);
+	float velocityLen = length(velocity * float2(ViewportAspect, 1.0f));
 	if (velocityLen > maxVelocity)
 	{
 		velocity = velocity * (maxVelocity / velocityLen);

@@ -194,7 +194,7 @@ float ApproximateHG(float cosTheta, float g)
 /**
  * Multi-spectral Subsurface Scattering (Penner & Borshukov, upstream-exact).
  * Transmittance color comes exclusively from material.customDataB (authored,
- * uniform per material) — never synthesized from texture albedo: albedo-derived
+ * uniform per material) - never synthesized from texture albedo: albedo-derived
  * SSS color makes the terminator response vary patchily across blush/shadow
  * makeup zones of the skin texture.
  */
@@ -278,7 +278,7 @@ float SkinRotatedNoL(float unClampedNoL, float surfaceShadow)
 
 /**
  * Analytic pre-integrated skin (upstream-exact polynomial of the Jimenez LUT).
- * Smooth in BOTH the half-Lambert remapped nl and the curvature remap — no
+ * Smooth in BOTH the half-Lambert remapped nl and the curvature remap - no
  * saturation-driven piecewise terms, no kinks at the terminator, no probes.
  * curvatures enter only as a coordinate of the curve, keeping the response
  * scale-independent across models of different sizes.
@@ -724,10 +724,8 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 	}
 }
 
-#define pow2(x) ((x) * (x))
-
 // Cloth visibility model: 0 = Neubelt/Pettineo (cheap, default), 1 = full
-// Estevez & Kulla exponential fit. The fit costs 2× exp + a pow fit but gives
+// Estevez & Kulla exponential fit. The fit costs 2x exp + a pow fit but gives
 // a noticeably better grazing-angle sheen falloff; off by default because
 // cloth shading runs in every lighting pass.
 #ifndef BRDF_CLOTH_VIS_CHARLIE
@@ -890,7 +888,7 @@ float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, fl
 
 /**
  * Translucency add dispatch: SKIN and SUBSURFACE both receive the material's
- * authored transmittance response. No screen-space probes — light bleed is
+ * authored transmittance response. No screen-space probes - light bleed is
  * shaped purely by the ndotl-based term, so no false-thickness artifacts can
  * be sourced from the G-buffer at all. `coord` keeps call-site signatures
  * intact and is unused. `ao` / `shadow` only feed the cheat style.

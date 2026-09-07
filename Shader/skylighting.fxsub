@@ -155,7 +155,7 @@ void ShadingMaterial(MaterialParam material, float3 worldView, out float3 diffus
 	{
 		diffuse += ImageBasedLightSubsurface(material, N, prefilteredDiffuse);
 
-		// Energy-budget cap: ambient + back-light SSS may not exceed the front irradiance —
+		// Energy-budget cap: ambient + back-light SSS may not exceed the front irradiance -
 		// otherwise ambient-lit skin outshines white surfaces and feeds an inflated GI emitter.
 		// C^1 soft knee (monotone Hermite ramp) instead of a hard clip: the hard knee snapped the warm
 		// SSS chroma excess flat at the budget boundary, painting desaturated gray-blue

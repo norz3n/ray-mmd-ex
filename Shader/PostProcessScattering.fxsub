@@ -40,8 +40,8 @@ float4 SSSGaussBlurPS(
 	//   Jimenez et al. "Separable Subsurface Scattering" (SIGGRAPH 2015)
 	//   Christensen & Burley "Approximate Reflectance Profiles for Efficient
 	//     Subsurface Scattering" (PIXAR Technical Memo 08-01)
-	//   UE5 PostProcessSubsurface.usf – recombine & tint pattern
-	//   ikPolishShader sss.fxsub – absorption-aware bilateral depth weighting
+	//   UE5 PostProcessSubsurface.usf - recombine & tint pattern
+	//   ikPolishShader sss.fxsub - absorption-aware bilateral depth weighting
 	// -------------------------------------------------------------------------
 
 	// Sample offsets in normalised kernel space (symmetric around centre).
@@ -52,8 +52,8 @@ float4 SSSGaussBlurPS(
 	// Christensen-Burley reflectance profile integrated into RGB kernel weights.
 	//
 	// Two profiles:
-	//   Profile 0 – SHADINGMODELID_SKIN   (epidermis + subdermal blood, warm red)
-	//   Profile 1 – SHADINGMODELID_SUBSURFACE (deep tissue / thin ears, cooler red)
+	//   Profile 0 - SHADINGMODELID_SKIN   (epidermis + subdermal blood, warm red)
+	//   Profile 1 - SHADINGMODELID_SUBSURFACE (deep tissue / thin ears, cooler red)
 	//
 	// Center weights (W0) encode the fraction of energy kept at r=0.
 	// Pair weights (W[i]) encode the bilateral Gaussian lobe at each offset.
@@ -125,14 +125,14 @@ float4 SSSGaussBlurPS(
 	float  sssStrength   = isSkin ? 1.0f : sssAmount;
 
 	// Kernel width multiplier. Subsurface geometry (ears, nostrils) tends to be
-	// thinner → amplify the footprint so backlit translucency is readable.
+	// thinner -> amplify the footprint so backlit translucency is readable.
 	float  sssWidthScale = isSkin ? mSSSSScale : (mSSSSScale * 2.0f);
 
 	// -------------------------------------------------------------------------
 	// Absorption-aware scatter coefficient (after ikPolishShader).
 	//
-	// High-albedo (bright) pixels absorb less → scatter further → wider kernel.
-	// Low-albedo (dark) pixels have higher internal absorption → narrower kernel.
+	// High-albedo (bright) pixels absorb less -> scatter further -> wider kernel.
+	// Low-albedo (dark) pixels have higher internal absorption -> narrower kernel.
 	// This is the key physical insight missing from the previous ad-hoc weights.
 	// -------------------------------------------------------------------------
 	float3 albedo    = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0)).rgb;
@@ -140,7 +140,7 @@ float4 SSSGaussBlurPS(
 	// normalise so the dominant channel sets scale (prevents tinting in dark areas).
 	float3 albedoSq  = saturate(albedo * albedo);
 	float  albedoMax = max(max(albedoSq.r, albedoSq.g), albedoSq.b) + 1e-4f;
-	// absorption: bright → low absorption (wide); dark → high (narrow). Range ~[0.01, 1].
+	// absorption: bright -> low absorption (wide); dark -> high (narrow). Range ~[0.01, 1].
 	float3 absorption = saturate(1.0f - albedoSq / albedoMax) * 0.9f + 0.1f;
 
 	// -------------------------------------------------------------------------
@@ -150,13 +150,13 @@ float4 SSSGaussBlurPS(
 	float3 P = GetViewPosition(projConstant, coord, linearDepth);
 
 	// Project the tangent-space view alignment to screen: avoids blurring across
-	// silhouettes by modulating the step with surface→camera alignment.
+	// silhouettes by modulating the step with surface->camera alignment.
 	float perspScaleX  = dot(normalize(N.xz + 1e-6f), normalize(-P.xz + 1e-6f));
 	float perspScaleY  = dot(normalize(N.yz + 1e-6f), normalize(-P.yz + 1e-6f));
 	float perspScale   = max(dot(direction, float2(perspScaleX, perspScaleY)), 0.25f);
 
 	// World-space SSS radius (cm) projected to screen.
-	// 0.0050 ≈ 5 mm at unit world-scale; divided by depth to convert to NDC.
+	// 0.0050 ~ 5 mm at unit world-scale; divided by depth to convert to NDC.
 	float sssRadius    = (0.0050f * sssStrength * perspScale) / max(sssWidthScale, 0.01f);
 	float2 sampleStep  = direction * (sssRadius / max(linearDepth, 0.1f))
 	                   * float2(1.0f / ViewportAspect, 1.0f);
@@ -197,8 +197,8 @@ float4 SSSGaussBlurPS(
 		float3 N2   = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(uv2, 0, 0)).xyz);
 
 		// Absorption-modulated depth tolerance:
-		//   high absorption (dark) → tight tolerance (less bleeding across edges)
-		//   low absorption (bright) → loose tolerance (soft tissue blends through)
+		//   high absorption (dark) -> tight tolerance (less bleeding across edges)
+		//   low absorption (bright) -> loose tolerance (soft tissue blends through)
 		// The base window grows with tap offset to allow limb-curvature overlap.
 		float3 depthWin      = absorption * (tapOff * sssRadius * 6.0f)
 		                     + max(linearDepth * 0.05f, 0.06f);

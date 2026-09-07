@@ -27,7 +27,7 @@
 #define SKIN_GI_COMPENSATION      0.10f
 // SSGI skin bounce suppression: skin throws off too much glow, damp its emitter
 // contribution.  Applied before the mode-2 gather gain (PI*8), so the effective
-// room bounce off skin is scale x PI x 8 x receiver response — keep the raw
+// room bounce off skin is scale x PI x 8 x receiver response - keep the raw
 // scale small enough that this reads as a faint dermal glow, not a light source.
 #define SKIN_GI_EMISSION_SCALE    0.04f
 

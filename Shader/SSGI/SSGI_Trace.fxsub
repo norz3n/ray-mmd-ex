@@ -18,7 +18,7 @@
  *
  * ibl.fxsub's DecodeYcbcr costs 5 taps plus chroma edge filtering and blew the
  * ps_3_0 temp register budget (X4505) when inlined into the gather loop.  The
- * env map is pre-blurred, so the edge filter is unnecessary here — only the
+ * env map is pre-blurred, so the edge filter is unnecessary here - only the
  * neighbouring pixel's interleaved chroma channel is required.
  */
 float3 SampleSkyRadiance(float2 skyUv)

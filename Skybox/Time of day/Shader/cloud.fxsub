@@ -53,7 +53,7 @@ float noise3D(in float3 p)
 	float3 ip = floor(p);
 	float3 fp = frac(p);
 	// Quintic Hermite: f(t) = 6t^5 - 15t^4 + 10t^3
-	// C2 continuous — no visible grid artifacts unlike cubic Hermite
+	// C2 continuous - no visible grid artifacts unlike cubic Hermite
 	fp = fp * fp * fp * (fp * (fp * 6.0f - 15.0f) + 10.0f);
 	
 	float2 uv0 = (ip.xz + float2(37.0f, 17.0f) * ip.y) + fp.xz;
@@ -71,7 +71,7 @@ float DensityRemap(float x, float a, float b, float c, float d)
 }
 
 // ==============================================================================
-// CUMULUS HEIGHT GRADIENT — PHYSICALLY-MOTIVATED VERTICAL PROFILE
+// CUMULUS HEIGHT GRADIENT - PHYSICALLY-MOTIVATED VERTICAL PROFILE
 // Flat base, billowing dome body, subtle anvil broadening at high altitude
 // ==============================================================================
 
@@ -89,7 +89,7 @@ float CumulusHeightGradient(float h)
 }
 
 // ==============================================================================
-// 3D VOLUMETRIC DENSITY — MULTI-SCALE SHAPE + HEIGHT-ADAPTIVE EROSION
+// 3D VOLUMETRIC DENSITY - MULTI-SCALE SHAPE + HEIGHT-ADAPTIVE EROSION
 // ==============================================================================
 
 float EvaluateCloudDensity(ScatteringParams setting, float3 positionPS, out float cloudHeight)
@@ -149,7 +149,7 @@ float EvaluateCloudDensity(ScatteringParams setting, float3 positionPS, out floa
 	return erodedCloud * 2.8f;
 }
 
-// Lightweight evaluation for shadow/light rays — single-octave noise for accuracy
+// Lightweight evaluation for shadow/light rays - single-octave noise for accuracy
 float EvaluateCloudDensityCheap(ScatteringParams setting, float3 positionPS)
 {
 	float r = length(positionPS - setting.earthCenter);
@@ -167,7 +167,7 @@ float EvaluateCloudDensityCheap(ScatteringParams setting, float3 positionPS)
 	float coverageMask = saturate((weather1 - weatherThreshold) / max(1.0f - weatherThreshold, 0.01f));
 	if (coverageMask <= 0.001f) return 0.0f;
 
-	// Single-octave shape noise — more accurate than pure weather mask
+	// Single-octave shape noise - more accurate than pure weather mask
 	float shapeNoise = noise3D(p * 0.00052f);
 	float threshold = 1.0f - coverageMask * heightGradient;
 	float density = DensityRemap(shapeNoise, threshold, 1.0f, 0.0f, 1.0f);
@@ -271,7 +271,7 @@ float3 EvaluateSunTransmittance(ScatteringParams setting, float3 positionPS, flo
 }
 
 // ==============================================================================
-// VOLUMETRIC INTEGRATION — PHYSICAL ATMOSPHERIC SUN & SKY INTEGRATION
+// VOLUMETRIC INTEGRATION - PHYSICAL ATMOSPHERIC SUN & SKY INTEGRATION
 // ==============================================================================
 
 void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, float3 skyAmbient, inout float opticalDepth, inout float3 insctrMie)
@@ -417,7 +417,7 @@ float4 ComputeCloudsInscattering(ScatteringParams setting, float3 eye, float3 V,
 				float cloudsOpticalLength = 0.0f;
 				ComputeCloudsInsctrIntegral(setting, cloudsStart, cloudsEnd, V, -L, skyAmbient, cloudsOpticalLength, cloudsMie);
 
-				// Aerial perspective fade — less aggressive near horizon for wider visible range
+				// Aerial perspective fade - less aggressive near horizon for wider visible range
 				float horizonFade = saturate(abs(V.y) * 6.0f + 0.12f);
 				float cloudTransmittance = exp(-cloudsOpticalLength * 4.0f);
 				sky = lerp(sky, sky * cloudTransmittance + cloudsMie, horizonFade);

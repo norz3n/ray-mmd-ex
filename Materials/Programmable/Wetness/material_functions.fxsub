@@ -15,9 +15,9 @@
 
 #if WETNESS_POROSITY_MAP_FROM >= 1 && WETNESS_POROSITY_MAP_FROM <= 2
 	#if WETNESS_POROSITY_MAP_FROM == 1
-		texture WetnessPorosityMap<string ResourceName = WETNESS_POROSITY_MAP_FROM;>;
+		texture WetnessPorosityMap<string ResourceName = WETNESS_POROSITY_MAP_FILE;>;
 	#elif WETNESS_POROSITY_MAP_FROM == 2
-		texture WetnessPorosityMap : ANIMATEDTEXTURE<string ResourceName = WETNESS_POROSITY_MAP_FROM;>;
+		texture WetnessPorosityMap : ANIMATEDTEXTURE<string ResourceName = WETNESS_POROSITY_MAP_FILE;>;
 	#endif
 	sampler WetnessPorosityMapSamp = sampler_state
 	{

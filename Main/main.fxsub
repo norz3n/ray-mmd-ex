@@ -357,7 +357,7 @@ void MainVS(
 }
 
 // Render passthrough for ray-mmd: alpha cutout only.  The matcap highlight
-// layer was removed in v1.15 — specular detail comes from the deferred
+// layer was removed in v1.15 - specular detail comes from the deferred
 // Materials passes (PBR + IBL), not from this forward layer.
 float4 MainPS(float2 coord : TEXCOORD0) : COLOR
 {

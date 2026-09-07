@@ -3,6 +3,31 @@
 #define PROCEDURAL_HAIR_INTENSITY 0.5
 #endif
 
+#ifndef EYE_PARALLAX_ENABLE
+#define EYE_PARALLAX_ENABLE 0
+#endif
+#ifndef EYE_IRIS_DEPTH
+#define EYE_IRIS_DEPTH 0.05f
+#endif
+#ifndef EYE_CORNEA_IOR
+#define EYE_CORNEA_IOR 1.376f
+#endif
+
+#ifndef GLITTER_ENABLE
+#define GLITTER_ENABLE 0
+#endif
+#ifndef GLITTER_DENSITY
+#define GLITTER_DENSITY 150.0f
+#endif
+#ifndef GLITTER_ROUGHNESS
+#define GLITTER_ROUGHNESS 0.50f
+#endif
+#ifndef GLITTER_INTENSITY
+#define GLITTER_INTENSITY 2.0f
+#endif
+
+float3 CameraPosition : POSITION < string Object = "Camera"; >;
+
 float4x4 matView : VIEW;
 float4x4 matWorld : WORLD;
 float4x4 matWorldView : WORLDVIEW;
@@ -450,6 +475,37 @@ shared texture Gbuffer8RT: RENDERCOLORTARGET;
 	};
 #endif
 
+#ifndef DETAIL_MAP_ENABLE
+#define DETAIL_MAP_ENABLE 0
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_FILE
+#define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_SCALE
+#define DETAIL_NORMAL_MAP_SCALE 1.0f
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_LOOP_NUM
+#define DETAIL_NORMAL_MAP_LOOP_NUM 20.0f
+#endif
+
+#ifndef DETAIL_MAP_FADE_DIST
+#define DETAIL_MAP_FADE_DIST 15.0f
+#endif
+
+#if DETAIL_MAP_ENABLE
+	texture DetailNormalMap<string ResourceName = DETAIL_NORMAL_MAP_FILE;>;
+	sampler DetailNormalMapSamp = sampler_state
+	{
+		texture = DetailNormalMap;
+		MAXANISOTROPY = TEXTURE_ANISOTROPY_LEVEL;
+		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
+		ADDRESSU = WRAP; ADDRESSV = WRAP;
+	};
+#endif
+
 struct MaterialParam
 {
 	float3 normal;
@@ -519,6 +575,260 @@ float3 ColorSynthesis(float3 diffuse, float3 m)
 	float3 melanin = diffuse * luminance(diffuse);
 	return diffuse * lerp(1.0, melanin, m);
 }
+
+#ifndef HEX_TILING_ENABLE
+#define HEX_TILING_ENABLE 0
+#endif
+
+#ifndef HEX_TILING_ROTATION
+#define HEX_TILING_ROTATION 1.0f
+#endif
+
+#ifndef HEX_TILING_CONTRAST
+#define HEX_TILING_CONTRAST 0.6f
+#endif
+
+#ifndef HEX_TILING_SHARPNESS
+#define HEX_TILING_SHARPNESS 7.0f
+#endif
+
+#ifndef ALBEDO_MAP_HEX_TILING
+#define ALBEDO_MAP_HEX_TILING HEX_TILING_ENABLE
+#endif
+
+#ifndef NORMAL_MAP_HEX_TILING
+#define NORMAL_MAP_HEX_TILING HEX_TILING_ENABLE
+#endif
+
+#ifndef NORMAL_SUB_MAP_HEX_TILING
+#define NORMAL_SUB_MAP_HEX_TILING HEX_TILING_ENABLE
+#endif
+
+#ifndef SMOOTHNESS_MAP_HEX_TILING
+#define SMOOTHNESS_MAP_HEX_TILING HEX_TILING_ENABLE
+#endif
+
+#ifndef METALNESS_MAP_HEX_TILING
+#define METALNESS_MAP_HEX_TILING HEX_TILING_ENABLE
+#endif
+
+#ifndef OCCLUSION_MAP_HEX_TILING
+#define OCCLUSION_MAP_HEX_TILING HEX_TILING_ENABLE
+#endif
+
+#ifndef HEX_TILING_DISTANCE_LOD
+#define HEX_TILING_DISTANCE_LOD 0
+#endif
+
+#ifndef HEX_TILING_LOD_START
+#define HEX_TILING_LOD_START 15.0f
+#endif
+
+#ifndef HEX_TILING_LOD_END
+#define HEX_TILING_LOD_END 35.0f
+#endif
+
+#ifndef HEX_TILING_HEIGHT_BLEND
+#define HEX_TILING_HEIGHT_BLEND 0
+#endif
+
+#ifndef HEX_TILING_HEIGHT_CONTRAST
+#define HEX_TILING_HEIGHT_CONTRAST 0.2f
+#endif
+
+#ifndef HASHED_ALPHA_TEST_ENABLE
+#define HASHED_ALPHA_TEST_ENABLE 0
+#endif
+
+#ifndef HASHED_ALPHA_SCALE
+#define HASHED_ALPHA_SCALE 1.0f
+#endif
+
+// Wyman & McGuire (I3D 2017): Hashed Alpha Testing
+float HashedAlphaThreshold(float3 pos, float scale)
+{
+	float3 p = pos * scale;
+	float maxDeriv = max(length(ddx(p)), length(ddy(p)));
+	float pixScale = 1.0f / (maxDeriv + 1e-5f);
+	float3 cell = floor(p * pixScale);
+	float h = frac(sin(dot(cell, float3(127.1f, 311.7f, 74.7f))) * 43758.5453f);
+	return clamp(h, 0.001f, 0.999f);
+}
+
+float3 HexHeightBlendWeights(float3 weights, float3 heights, float contrast = 0.2f)
+{
+	float3 combined = weights + heights;
+	float maxH = max(max(combined.x, combined.y), combined.z);
+	float3 blended = max(0.0f, combined - (maxH - contrast));
+	return blended / (blended.x + blended.y + blended.z + 1e-6f);
+}
+
+float3 HexDistanceFadeWeights(float3 weights, float dist, float startDist = 15.0f, float endDist = 35.0f)
+{
+	float fade = saturate((dist - startDist) / max(endDist - startDist, 1e-4f));
+	return lerp(weights, float3(1.0f, 0.0f, 0.0f), fade);
+}
+
+#if HEX_TILING_ENABLE || ALBEDO_MAP_HEX_TILING || NORMAL_MAP_HEX_TILING || NORMAL_SUB_MAP_HEX_TILING || SMOOTHNESS_MAP_HEX_TILING || METALNESS_MAP_HEX_TILING || OCCLUSION_MAP_HEX_TILING
+
+float2 HexHash(float2 p)
+{
+	float2 p2 = frac(p * float2(443.8975f, 397.2973f));
+	p2 += dot(p2, p2.yx + 19.19f);
+	return frac((p2.xx + p2.yy) * p2.xy);
+}
+
+void HexTriangleGrid(out float w1, out float w2, out float w3,
+                     out int2 vertex1, out int2 vertex2, out int2 vertex3,
+                     float2 st)
+{
+	st *= 2.0f * sqrt(3.0f);
+	const float2x2 gridToSkewedGrid = float2x2(1.0f, -0.57735027f, 0.0f, 1.15470054f);
+	float2 skewedCoord = mul(gridToSkewedGrid, st);
+
+	int2 baseId = int2(floor(skewedCoord));
+	float3 temp = float3(frac(skewedCoord), 0.0f);
+	temp.z = 1.0f - temp.x - temp.y;
+
+	float s = step(0.0f, -temp.z);
+	float s2 = 2.0f * s - 1.0f;
+
+	w1 = -temp.z * s2;
+	w2 = s - temp.y * s2;
+	w3 = s - temp.x * s2;
+
+	vertex1 = baseId + int2(s, s);
+	vertex2 = baseId + int2(s, 1 - s);
+	vertex3 = baseId + int2(1 - s, s);
+}
+
+float2 HexMakeCenST(int2 vertex)
+{
+	const float2x2 invSkewMat = float2x2(1.0f, 0.5f, 0.0f, 0.8660254f);
+	return mul(invSkewMat, (float2)vertex) / (2.0f * sqrt(3.0f));
+}
+
+float2x2 HexLoadRot2x2(int2 idx, float rotStrength)
+{
+	float2 h = HexHash((float2)idx);
+	float angle = (h.x * 2.0f - 1.0f) * 3.14159265359f * rotStrength;
+
+	float cs = cos(angle);
+	float si = sin(angle);
+	return float2x2(cs, -si, si, cs);
+}
+
+float3 HexGain3(float3 x, float r)
+{
+	float k = log(1.0f - r) / log(0.5f);
+	float3 s = 2.0f * step(0.5f, x);
+	float3 m = 2.0f * (1.0f - s);
+	float3 res = 0.5f * s + 0.25f * m * pow(max(0.0f, s + x * m), k);
+	return res.xyz / (res.x + res.y + res.z + 1e-6f);
+}
+
+float2 HexTspaceNormalToDerivative(float3 vM)
+{
+	const float scale = 1.0f / 128.0f;
+	const float3 vMa = abs(vM);
+	const float z_ma = max(vMa.z, scale * max(vMa.x, vMa.y));
+	return -float2(vM.x, vM.y) / z_ma;
+}
+
+struct HexTilingContext
+{
+	float3 weights;
+	float2 st1, st2, st3;
+	float2 dSTdx1, dSTdy1;
+	float2 dSTdx2, dSTdy2;
+	float2 dSTdx3, dSTdy3;
+	float2x2 rot1, rot2, rot3;
+};
+
+HexTilingContext MakeHexTilingContext(float2 st, float rotStrength = 1.0f)
+{
+	HexTilingContext ctx;
+
+	float2 dSTdx = ddx(st);
+	float2 dSTdy = ddy(st);
+
+	int2 vertex1, vertex2, vertex3;
+	HexTriangleGrid(ctx.weights.x, ctx.weights.y, ctx.weights.z, vertex1, vertex2, vertex3, st);
+
+	ctx.rot1 = HexLoadRot2x2(vertex1, rotStrength);
+	ctx.rot2 = HexLoadRot2x2(vertex2, rotStrength);
+	ctx.rot3 = HexLoadRot2x2(vertex3, rotStrength);
+
+	float2 cen1 = HexMakeCenST(vertex1);
+	float2 cen2 = HexMakeCenST(vertex2);
+	float2 cen3 = HexMakeCenST(vertex3);
+
+	ctx.st1 = mul(st - cen1, ctx.rot1) + cen1 + HexHash((float2)vertex1);
+	ctx.st2 = mul(st - cen2, ctx.rot2) + cen2 + HexHash((float2)vertex2);
+	ctx.st3 = mul(st - cen3, ctx.rot3) + cen3 + HexHash((float2)vertex3);
+
+	ctx.dSTdx1 = mul(dSTdx, ctx.rot1);
+	ctx.dSTdy1 = mul(dSTdy, ctx.rot1);
+	ctx.dSTdx2 = mul(dSTdx, ctx.rot2);
+	ctx.dSTdy2 = mul(dSTdy, ctx.rot2);
+	ctx.dSTdx3 = mul(dSTdx, ctx.rot3);
+	ctx.dSTdy3 = mul(dSTdy, ctx.rot3);
+
+	return ctx;
+}
+
+float4 SampleColorHexTiled(sampler2D tex, HexTilingContext ctx, float r = 0.75f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+	float4 c1 = tex2Dgrad(tex, ctx.st1, ctx.dSTdx1, ctx.dSTdy1);
+	float4 c2 = tex2Dgrad(tex, ctx.st2, ctx.dSTdx2, ctx.dSTdy2);
+	float4 c3 = tex2Dgrad(tex, ctx.st3, ctx.dSTdx3, ctx.dSTdy3);
+
+	const float3 Lw = float3(0.299f, 0.587f, 0.114f);
+	float3 Dw = float3(dot(c1.rgb, Lw), dot(c2.rgb, Lw), dot(c3.rgb, Lw));
+	Dw = lerp(1.0f, Dw, fallOffContrast);
+
+	float3 W = Dw * pow(max(0.0f, ctx.weights), gExp);
+	W /= (W.x + W.y + W.z + 1e-6f);
+	if (r != 0.5f) W = HexGain3(W, r);
+
+	return W.x * c1 + W.y * c2 + W.z * c3;
+}
+
+float3 SampleNormalMapHexTiled(sampler2D nmap, HexTilingContext ctx, float r = 0.5f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+	float3 n1 = tex2Dgrad(nmap, ctx.st1, ctx.dSTdx1, ctx.dSTdy1).rgb * 2.0f - 1.0f;
+	float3 n2 = tex2Dgrad(nmap, ctx.st2, ctx.dSTdx2, ctx.dSTdy2).rgb * 2.0f - 1.0f;
+	float3 n3 = tex2Dgrad(nmap, ctx.st3, ctx.dSTdx3, ctx.dSTdy3).rgb * 2.0f - 1.0f;
+
+	float2 d1 = mul(ctx.rot1, HexTspaceNormalToDerivative(n1));
+	float2 d2 = mul(ctx.rot2, HexTspaceNormalToDerivative(n2));
+	float2 d3 = mul(ctx.rot3, HexTspaceNormalToDerivative(n3));
+
+	float3 D = float3(dot(d1, d1), dot(d2, d2), dot(d3, d3));
+	float3 Dw = sqrt(D / (1.0f + D));
+	Dw = lerp(1.0f, Dw, fallOffContrast);
+
+	float3 W = Dw * pow(max(0.0f, ctx.weights), gExp);
+	W /= (W.x + W.y + W.z + 1e-6f);
+	if (r != 0.5f) W = HexGain3(W, r);
+
+	float2 blendedDeriv = W.x * d1 + W.y * d2 + W.z * d3;
+	return normalize(float3(-blendedDeriv.xy, 1.0f));
+}
+
+float4 SampleColorHexTiled(sampler2D tex, float2 st, float rotStrength = 1.0f, float r = 0.75f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+	HexTilingContext ctx = MakeHexTilingContext(st, rotStrength);
+	return SampleColorHexTiled(tex, ctx, r, fallOffContrast, gExp);
+}
+
+float3 SampleNormalMapHexTiled(sampler2D nmap, float2 st, float rotStrength = 1.0f, float r = 0.5f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+	HexTilingContext ctx = MakeHexTilingContext(st, rotStrength);
+	return SampleNormalMapHexTiled(nmap, ctx, r, fallOffContrast, gExp);
+}
+
+#endif // HEX_TILING_ENABLE
 
 // ponytail: Triplanar projection helper for sampling textures without UV unwrap
 float4 SampleTriplanar(sampler texSamp, float3 worldPos, float3 worldNormal, float scale)
@@ -716,7 +1026,85 @@ float2 ParallaxOcclusionMap(sampler heightMap, float2 coord, float3 V, int numSt
 
 	return curTexcoord;
 }
+
+float ParallaxSelfShadow(sampler heightMap, float2 coord, float3 L, float initialHeight, float parallaxScale, int numShadowSteps = 8)
+{
+	if (L.z <= 0.0f) return 0.0f;
+	float step = (1.0f - initialHeight) / (float)numShadowSteps;
+	float2 delta = parallaxScale * L.xy / (max(L.z, 0.05f) * (float)numShadowSteps);
+
+	float curLayerHeight = initialHeight + step * 0.5f;
+	float2 curTexcoord = coord + delta * 0.5f;
+	float shadow = 1.0f;
+
+	[loop]
+	for (int i = 0; i < numShadowSteps; i++)
+	{
+		float h = GetParallaxOcclusionHeight(heightMap, curTexcoord);
+		if (h > curLayerHeight)
+		{
+			float occlusion = (h - curLayerHeight) * (1.0f - float(i) / (float)numShadowSteps);
+			shadow = min(shadow, saturate(1.0f - occlusion * 4.0f));
+			if (shadow <= 0.01f) break;
+		}
+		curLayerHeight += step;
+		curTexcoord += delta;
+	}
+	return shadow;
+}
 #endif
+
+/**
+ * Cornea Refraction & Iris Parallax Mapping (based on Jimenez / Next-Gen Eye Shading).
+ * Computes Snell's law refraction through the corneal dome into the anterior chamber,
+ * offsetting the 2D iris texture to create realistic depth, limbal darkening, and caustic focus.
+ */
+float2 ComputeCorneaIrisParallax(float2 uv, float3 viewDir, float3 normal, float irisDepth, float corneaIOR, out float outCaustic, out float outLimbal)
+{
+	// Refract view ray through the corneal dome (Air -> Cornea IOR)
+	float eta = 1.0f / max(corneaIOR, 1.0f);
+	float3 refrRay = refract(-viewDir, normal, eta);
+	if (all(refrRay == 0.0f))
+		refrRay = -viewDir;
+
+	// Parallax shift into anterior chamber
+	float2 uvOffset = (refrRay.xy / max(abs(refrRay.z), 0.25f)) * irisDepth;
+	float2 refractedUV = uv + uvOffset;
+
+	// Limbal ring darkening (dark perimeter around iris boundary)
+	float2 centeredUV = (uv - 0.5f) * 2.0f;
+	float distFromCenter = length(centeredUV);
+	outLimbal = saturate(smoothstep(0.98f, 0.70f, distFromCenter) + 0.35f);
+
+	// Iris caustic highlight (light focus on the opposite side of the pupil)
+	outCaustic = saturate(pow(saturate(dot(refrRay, normal) * 0.5f + 0.5f), 2.5f) * 1.5f);
+
+	return refractedUV;
+}
+
+/**
+ * Procedural Micro-Glitter / Sparkle Generator (Stochastic Micro-Flake Distribution).
+ * Simulates glittering flakes and crystals on metallic fabrics, cosmetics, snow, and car paint.
+ * Evaluates random micro-normal orientations per cell that flash when aligned with the half-vector H.
+ */
+float ComputeMicroGlitterSparkle(float3 worldPos, float3 N, float3 H, float flakeDensity = 120.0f, float flakeRoughness = 0.55f, float sparkleIntensity = 2.5f)
+{
+	float3 cellCoord = floor(worldPos * flakeDensity);
+	// High-quality branchless 3D pseudo-random hash
+	float3 hash = frac(sin(float3(
+		dot(cellCoord, float3(12.9898f, 78.233f, 45.164f)),
+		dot(cellCoord, float3(39.346f, 11.135f, 83.156f)),
+		dot(cellCoord, float3(73.156f, 52.235f, 29.178f))
+	)) * 43758.5453f) * 2.0f - 1.0f;
+
+	// Perturb surface normal with stochastic flake orientation
+	float3 flakeNormal = normalize(N + hash * flakeRoughness);
+	float NdotH = saturate(dot(flakeNormal, H));
+
+	// Sharp microfacet specular response (flash when facing H)
+	float sparkle = pow(NdotH, 120.0f) * sparkleIntensity;
+	return sparkle;
+}
 
 float SmoothnessToRoughness(float smoothness)
 {
@@ -792,7 +1180,11 @@ float3 GetAlbedo(float2 coord, float3 worldPos, float3 normal)
 	#endif
 
 	#if ALBEDO_MAP_FROM == 3
-		float3 albedoColor = use_texture ? tex2D(AlbedoMapSamp, coord * albedoMapLoopNum).rgb : MaterialDiffuse.rgb;
+		#if ALBEDO_MAP_HEX_TILING
+			float3 albedoColor = use_texture ? SampleColorHexTiled(AlbedoMapSamp, coord * albedoMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS).rgb : MaterialDiffuse.rgb;
+		#else
+			float3 albedoColor = use_texture ? tex2D(AlbedoMapSamp, coord * albedoMapLoopNum).rgb : MaterialDiffuse.rgb;
+		#endif
 	#elif ALBEDO_MAP_FROM == 4
 		float3 albedoColor = use_spheremap ? tex2D(AlbedoMapSamp, coord * albedoMapLoopNum).rgb : MaterialDiffuse.rgb;
 	#elif ALBEDO_MAP_FROM == 5
@@ -804,7 +1196,11 @@ float3 GetAlbedo(float2 coord, float3 worldPos, float3 normal)
 	#elif ALBEDO_MAP_FROM == 9
 		#error Unsupported options 9.
 	#else
-		float3 albedoColor = tex2D(AlbedoMapSamp, coord * albedoMapLoopNum).rgb;
+		#if ALBEDO_MAP_HEX_TILING
+			float3 albedoColor = SampleColorHexTiled(AlbedoMapSamp, coord * albedoMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS).rgb;
+		#else
+			float3 albedoColor = tex2D(AlbedoMapSamp, coord * albedoMapLoopNum).rgb;
+		#endif
 	#endif
 
 	#if ALBEDO_MAP_APPLY_DIFFUSE
@@ -954,28 +1350,38 @@ float3 GetMainNormal(float3 N, float3 P, float2 coord)
 		coord = 1 - coord;
 	#endif
 
-	#if NORMAL_MAP_FROM == 3
-		float3 tangentNormal = use_texture ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
-	#elif NORMAL_MAP_FROM == 4
-		float3 tangentNormal = use_spheremap ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
-	#elif NORMAL_MAP_FROM == 5
-		float3 tangentNormal = use_toon ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
-	#elif NORMAL_MAP_FROM == 7 || NORMAL_MAP_FROM == 8 || NORMAL_MAP_FROM == 9
-		#error Unsupported options 7, 8, 9.
-	#else
-		float3 tangentNormal = tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1;
-	#endif
-
-	#if NORMAL_MAP_TYPE == 1
-		tangentNormal.z = sqrt(1.0 - tangentNormal.x * tangentNormal.x - tangentNormal.y * tangentNormal.y);
-	#elif NORMAL_MAP_TYPE == 3
-		tangentNormal = PerturbNormalHQ(NormalMapSamp, coord * normalMapLoopNum);
+	#if NORMAL_MAP_TYPE == 3
+		float3 tangentNormal = PerturbNormalHQ(NormalMapSamp, coord * normalMapLoopNum);
 	#elif NORMAL_MAP_TYPE == 5
-		tangentNormal = PerturbNormalUltra(NormalMapSamp, coord * normalMapLoopNum);
-	#elif NORMAL_MAP_TYPE == 2
-		tangentNormal = PerturbNormalLQ(N, P, tangentNormal.x * normalMapScale);
-		#if NORMAL_SUB_MAP_FROM
-			#error Unsupported bump map (Low Quality) with second normal map. Please set NORMAL_SUB_MAP_FROM to 0.
+		float3 tangentNormal = PerturbNormalUltra(NormalMapSamp, coord * normalMapLoopNum);
+	#else
+		#if NORMAL_MAP_FROM == 3
+			#if NORMAL_MAP_HEX_TILING
+				float3 tangentNormal = use_texture ? SampleNormalMapHexTiled(NormalMapSamp, coord * normalMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) : float3(0, 0, 1);
+			#else
+				float3 tangentNormal = use_texture ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
+			#endif
+		#elif NORMAL_MAP_FROM == 4
+			float3 tangentNormal = use_spheremap ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
+		#elif NORMAL_MAP_FROM == 5
+			float3 tangentNormal = use_toon ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
+		#elif NORMAL_MAP_FROM == 7 || NORMAL_MAP_FROM == 8 || NORMAL_MAP_FROM == 9
+			#error Unsupported options 7, 8, 9.
+		#else
+			#if NORMAL_MAP_HEX_TILING
+				float3 tangentNormal = SampleNormalMapHexTiled(NormalMapSamp, coord * normalMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS);
+			#else
+				float3 tangentNormal = tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1;
+			#endif
+		#endif
+
+		#if NORMAL_MAP_TYPE == 1
+			tangentNormal.z = sqrt(1.0 - tangentNormal.x * tangentNormal.x - tangentNormal.y * tangentNormal.y);
+		#elif NORMAL_MAP_TYPE == 2
+			tangentNormal = PerturbNormalLQ(N, P, tangentNormal.x * normalMapScale);
+			#if NORMAL_SUB_MAP_FROM
+				#error Unsupported bump map (Low Quality) with second normal map. Please set NORMAL_SUB_MAP_FROM to 0.
+			#endif
 		#endif
 	#endif
 
@@ -984,7 +1390,29 @@ float3 GetMainNormal(float3 N, float3 P, float2 coord)
 		tangentNormal = normalize(tangentNormal);
 	#endif
 
+#if DETAIL_MAP_ENABLE
+	float detailDist = distance(P, CameraPosition);
+	float detailFade = saturate(1.0f - detailDist / max(DETAIL_MAP_FADE_DIST, 1e-3f));
+	if (detailFade > 0.0f)
+	{
+		float3 detailN = tex2D(DetailNormalMapSamp, coord * DETAIL_NORMAL_MAP_LOOP_NUM).rgb * 2.0f - 1.0f;
+		detailN.xy *= DETAIL_NORMAL_MAP_SCALE * detailFade;
+		detailN = normalize(detailN);
+		tangentNormal = RNMBlendUnpacked(tangentNormal, detailN);
+	}
+#endif
+
 	return tangentNormal;
+#elif DETAIL_MAP_ENABLE
+	float detailDist = distance(P, CameraPosition);
+	float detailFade = saturate(1.0f - detailDist / max(DETAIL_MAP_FADE_DIST, 1e-3f));
+	if (detailFade > 0.0f)
+	{
+		float3 detailN = tex2D(DetailNormalMapSamp, coord * DETAIL_NORMAL_MAP_LOOP_NUM).rgb * 2.0f - 1.0f;
+		detailN.xy *= DETAIL_NORMAL_MAP_SCALE * detailFade;
+		return normalize(detailN);
+	}
+	return float3(0, 0, 1);
 #else
 	return float3(0, 0, 1);
 #endif
@@ -1002,7 +1430,11 @@ float3 GetSubNormal(float3 N, float3 P, float2 coord)
 	#endif
 
 	#if NORMAL_SUB_MAP_FROM == 3
-		float3 tangentNormal = use_texture ? tex2D(NormalSubMapSamp, coord * normalSubMapLoopNum).rgb : float3(0, 0, 1);
+		#if NORMAL_SUB_MAP_HEX_TILING
+			float3 tangentNormal = use_texture ? SampleNormalMapHexTiled(NormalSubMapSamp, coord * normalSubMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) * 0.5 + 0.5 : float3(0.5, 0.5, 1);
+		#else
+			float3 tangentNormal = use_texture ? tex2D(NormalSubMapSamp, coord * normalSubMapLoopNum).rgb : float3(0, 0, 1);
+		#endif
 	#elif NORMAL_SUB_MAP_FROM == 4
 		float3 tangentNormal = use_spheremap ? tex2D(NormalSubMapSamp, coord * normalSubMapLoopNum).rgb : float3(0, 0, 1);
 	#elif NORMAL_SUB_MAP_FROM == 5
@@ -1010,7 +1442,11 @@ float3 GetSubNormal(float3 N, float3 P, float2 coord)
 	#elif NORMAL_SUB_MAP_FROM == 7 || NORMAL_SUB_MAP_FROM == 8 || NORMAL_SUB_MAP_FROM == 9
 		#error Unsupported options 7, 8, 9.
 	#else
-		float3 tangentNormal = tex2D(NormalSubMapSamp, coord * normalSubMapLoopNum).rgb;
+		#if NORMAL_SUB_MAP_HEX_TILING
+			float3 tangentNormal = SampleNormalMapHexTiled(NormalSubMapSamp, coord * normalSubMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) * 0.5 + 0.5;
+		#else
+			float3 tangentNormal = tex2D(NormalSubMapSamp, coord * normalSubMapLoopNum).rgb;
+		#endif
 	#endif
 
 	#if NORMAL_SUB_MAP_TYPE != 4
@@ -1151,7 +1587,11 @@ float GetSmoothness(float2 coord)
 	#endif
 
 	#if SMOOTHNESS_MAP_FROM == 3
-		float4 smoothnessValues = use_texture ? tex2D(SmoothnessMapSamp, coord * smoothnessMapLoopNum) : 0;
+		#if SMOOTHNESS_MAP_HEX_TILING
+			float4 smoothnessValues = use_texture ? SampleColorHexTiled(SmoothnessMapSamp, coord * smoothnessMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) : 0;
+		#else
+			float4 smoothnessValues = use_texture ? tex2D(SmoothnessMapSamp, coord * smoothnessMapLoopNum) : 0;
+		#endif
 	#elif SMOOTHNESS_MAP_FROM == 4
 		float4 smoothnessValues = use_spheremap ? tex2D(SmoothnessMapSamp, coord * smoothnessMapLoopNum) : 0;
 	#elif SMOOTHNESS_MAP_FROM == 5
@@ -1163,7 +1603,11 @@ float GetSmoothness(float2 coord)
 	#elif SMOOTHNESS_MAP_FROM == 9
 		float4 smoothnessValues = ShininessToSmoothness(MaterialPower);
 	#else
-		float4 smoothnessValues = tex2D(SmoothnessMapSamp, coord * smoothnessMapLoopNum);
+		#if SMOOTHNESS_MAP_HEX_TILING
+			float4 smoothnessValues = SampleColorHexTiled(SmoothnessMapSamp, coord * smoothnessMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS);
+		#else
+			float4 smoothnessValues = tex2D(SmoothnessMapSamp, coord * smoothnessMapLoopNum);
+		#endif
 	#endif
 
 	#if SMOOTHNESS_MAP_SWIZZLE == 1
@@ -1206,7 +1650,11 @@ float GetMetalness(float2 coord)
 	#endif
 
 	#if METALNESS_MAP_FROM == 3
-		float4 metalnessValues = use_texture ? tex2D(MetalnessMapSamp, coord * metalnessMapLoopNum) : 0;
+		#if METALNESS_MAP_HEX_TILING
+			float4 metalnessValues = use_texture ? SampleColorHexTiled(MetalnessMapSamp, coord * metalnessMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) : 0;
+		#else
+			float4 metalnessValues = use_texture ? tex2D(MetalnessMapSamp, coord * metalnessMapLoopNum) : 0;
+		#endif
 	#elif METALNESS_MAP_FROM == 4
 		float4 metalnessValues = use_spheremap ? tex2D(MetalnessMapSamp, coord * metalnessMapLoopNum) : 0;
 	#elif METALNESS_MAP_FROM == 5
@@ -1218,7 +1666,11 @@ float GetMetalness(float2 coord)
 	#elif METALNESS_MAP_FROM == 9
 		float4 metalnessValues = ShininessToSmoothness(MaterialPower);
 	#else
-		float4 metalnessValues = tex2D(MetalnessMapSamp, coord * metalnessMapLoopNum);
+		#if METALNESS_MAP_HEX_TILING
+			float4 metalnessValues = SampleColorHexTiled(MetalnessMapSamp, coord * metalnessMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS);
+		#else
+			float4 metalnessValues = tex2D(MetalnessMapSamp, coord * metalnessMapLoopNum);
+		#endif
 	#endif
 
 	#if METALNESS_MAP_SWIZZLE == 1
@@ -1322,7 +1774,11 @@ float GetOcclusion(float2 coord)
 	#endif
 
 	#if OCCLUSION_MAP_FROM == 3
-		float4 occlusionValues = use_texture ? tex2D(OcclusionMapSamp, coord * occlusionMapLoopNum) : 1;
+		#if OCCLUSION_MAP_HEX_TILING
+			float4 occlusionValues = use_texture ? SampleColorHexTiled(OcclusionMapSamp, coord * occlusionMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) : 1;
+		#else
+			float4 occlusionValues = use_texture ? tex2D(OcclusionMapSamp, coord * occlusionMapLoopNum) : 1;
+		#endif
 	#elif OCCLUSION_MAP_FROM == 4
 		float4 occlusionValues = use_spheremap ? tex2D(OcclusionMapSamp, coord * occlusionMapLoopNum) : 1;
 	#elif OCCLUSION_MAP_FROM == 5
@@ -1334,7 +1790,11 @@ float GetOcclusion(float2 coord)
 	#elif OCCLUSION_MAP_FROM == 9
 		#error Unsupported options 9.
 	#else
-		float4 occlusionValues = tex2D(OcclusionMapSamp, coord * occlusionMapLoopNum);
+		#if OCCLUSION_MAP_HEX_TILING
+			float4 occlusionValues = SampleColorHexTiled(OcclusionMapSamp, coord * occlusionMapLoopNum, HEX_TILING_ROTATION, 0.75f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS);
+		#else
+			float4 occlusionValues = tex2D(OcclusionMapSamp, coord * occlusionMapLoopNum);
+		#endif
 	#endif
 
 	#if OCCLUSION_MAP_SWIZZLE == 1
@@ -1662,7 +2122,12 @@ GbufferParam MaterialPS(
 
 	// ponytail: perform early alpha clip before expensive POM raymarching
 	float alpha = GetAlpha(coord0);
+#if HASHED_ALPHA_TEST_ENABLE
+	float hashedThreshold = HashedAlphaThreshold(worldPos.xyz, HASHED_ALPHA_SCALE);
+	clip(alpha - hashedThreshold);
+#else
 	clip(alpha - ALPHA_THRESHOLD);
+#endif
 #if ALPHA_MAP_FROM == 2
 	clip(-1);
 #endif
@@ -1672,18 +2137,40 @@ GbufferParam MaterialPS(
 		coord0.y = 1 - coord0.y;
 	#endif
 	float3 viewdir = ParallaxOcclusionDirection(normal, worldPos.xyz, coord0 * parallaxMapLoopNum);
-	coord0 = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float2 pomCoord = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float pomHeight = GetParallaxOcclusionHeight(ParallaxMapSamp, pomCoord);
+	float3 lightDirTangent = ParallaxOcclusionDirection(normal, worldPos.xyz + float3(0.0f, 10.0f, 0.0f), coord0 * parallaxMapLoopNum);
+	float pomShadow = ParallaxSelfShadow(ParallaxMapSamp, pomCoord, normalize(lightDirTangent), pomHeight, parallaxMapScale, 6);
+	coord0 = pomCoord;
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
 	#endif
+#else
+	float pomShadow = 1.0f;
+#endif
+
+#if EYE_PARALLAX_ENABLE
+	float3 eyeViewDir = normalize(CameraPosition - worldPos.xyz);
+	float eyeCaustic = 0.0f, eyeLimbal = 1.0f;
+	coord0 = ComputeCorneaIrisParallax(coord0, eyeViewDir, normal, EYE_IRIS_DEPTH, EYE_CORNEA_IOR, eyeCaustic, eyeLimbal);
 #endif
 
 	MaterialParam material;
 	material.albedo = GetSubAlbedo(GetAlbedo(coord0, worldPos.xyz, normal), coord0);
+#if EYE_PARALLAX_ENABLE
+	material.albedo = material.albedo * eyeLimbal + material.albedo * (eyeCaustic * 0.35f);
+#endif
 	material.normal = GetNormal(normal, worldPos.xyz, coord0);
 	material.smoothness = GetSmoothness(coord0);
 	material.metalness = GetMetalness(coord0);
 	material.specular = GetSpecular(coord0);
+#if GLITTER_ENABLE
+	float3 glitterV = normalize(CameraPosition - worldPos.xyz);
+	float3 glitterL = mul(float3(0.0f, 1.0f, 0.5f), (float3x3)matView);
+	float3 glitterH = normalize(glitterV + glitterL);
+	float sparkle = ComputeMicroGlitterSparkle(worldPos.xyz, material.normal, glitterH, GLITTER_DENSITY, GLITTER_ROUGHNESS, GLITTER_INTENSITY);
+	material.specular += sparkle * (1.0f - material.smoothness * 0.5f);
+#endif
 	material.customDataA = GetCustomDataA(coord0);
 #if CUSTOM_ENABLE == 1 // SHADINGMODELID_SKIN
 	float3 ddxP = ddx(worldPos.xyz);
@@ -1699,9 +2186,9 @@ GbufferParam MaterialPS(
 	material.emissive = GetEmissiveColor(coord0);
 	material.emissiveIntensity = GetEmissiveIntensity();
 #if OCCLUSION_MAP_TYPE == 2 || OCCLUSION_MAP_TYPE == 3
-	material.visibility = GetOcclusion(coord1);
+	material.visibility = GetOcclusion(coord1) * pomShadow;
 #else
-	material.visibility = GetOcclusion(coord0);
+	material.visibility = GetOcclusion(coord0) * pomShadow;
 #endif
 	material.lightModel = GetLightMode(material);
 	material.alpha = 1;
@@ -1721,7 +2208,12 @@ GbufferParam Material2PS(
 
 	// ponytail: perform early alpha clip before expensive POM raymarching
 	float alpha = GetAlpha(coord0);
+#if HASHED_ALPHA_TEST_ENABLE
+	float hashedThreshold2 = HashedAlphaThreshold(worldPos.xyz, HASHED_ALPHA_SCALE);
+	clip(alpha - hashedThreshold2);
+#else
 	clip(alpha - 0.01);
+#endif
 
 #if PARALLAX_MAP_FROM
 	#if PARALLAX_MAP_UV_FLIP
@@ -1729,21 +2221,44 @@ GbufferParam Material2PS(
 	#endif
 	float3 viewdir = ParallaxOcclusionDirection(normal, worldPos.xyz, coord0);
 #if PARALLAX_MAP_TYPE
-	coord0 = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float2 pomCoord2 = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float pomHeight2 = GetParallaxOcclusionHeight(ParallaxMapSamp, pomCoord2);
+	float3 lightDirTangent2 = ParallaxOcclusionDirection(normal, worldPos.xyz + float3(0.0f, 10.0f, 0.0f), coord0 * parallaxMapLoopNum);
+	float pomShadow2 = ParallaxSelfShadow(ParallaxMapSamp, pomCoord2, normalize(lightDirTangent2), pomHeight2, parallaxMapScale, 6);
+	coord0 = pomCoord2;
 #else
 	coord0 *= parallaxMapLoopNum;
+	float pomShadow2 = 1.0f;
 #endif
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
 	#endif
+#else
+	float pomShadow2 = 1.0f;
+#endif
+
+#if EYE_PARALLAX_ENABLE
+	float3 eyeViewDir2 = normalize(CameraPosition - worldPos.xyz);
+	float eyeCaustic2 = 0.0f, eyeLimbal2 = 1.0f;
+	coord0 = ComputeCorneaIrisParallax(coord0, eyeViewDir2, normal, EYE_IRIS_DEPTH, EYE_CORNEA_IOR, eyeCaustic2, eyeLimbal2);
 #endif
 
 	MaterialParam material;
 	material.albedo = GetSubAlbedo(GetAlbedo(coord0, worldPos.xyz, normal), coord0);
+#if EYE_PARALLAX_ENABLE
+	material.albedo = material.albedo * eyeLimbal2 + material.albedo * (eyeCaustic2 * 0.35f);
+#endif
 	material.normal = GetNormal(normal, worldPos.xyz, coord0);
 	material.smoothness = GetSmoothness(coord0);
 	material.metalness = GetMetalness(coord0);
 	material.specular = GetSpecular(coord0);
+#if GLITTER_ENABLE
+	float3 glitterV2 = normalize(CameraPosition - worldPos.xyz);
+	float3 glitterL2 = mul(float3(0.0f, 1.0f, 0.5f), (float3x3)matView);
+	float3 glitterH2 = normalize(glitterV2 + glitterL2);
+	float sparkle2 = ComputeMicroGlitterSparkle(worldPos.xyz, material.normal, glitterH2, GLITTER_DENSITY, GLITTER_ROUGHNESS, GLITTER_INTENSITY);
+	material.specular += sparkle2 * (1.0f - material.smoothness * 0.5f);
+#endif
 	material.customDataA = GetCustomDataA(coord0);
 #if CUSTOM_ENABLE == 1 // SHADINGMODELID_SKIN
 	float3 ddxP = ddx(worldPos.xyz);
@@ -1759,12 +2274,14 @@ GbufferParam Material2PS(
 	material.emissive = GetEmissiveColor(coord0);
 	material.emissiveIntensity = GetEmissiveIntensity();
 #if OCCLUSION_MAP_TYPE == 2 || OCCLUSION_MAP_TYPE == 3
-	material.visibility = GetOcclusion(coord1);
+	material.visibility = GetOcclusion(coord1) * pomShadow2;
 #else
-	material.visibility = GetOcclusion(coord0);
+	material.visibility = GetOcclusion(coord0) * pomShadow2;
 #endif
 	material.lightModel = GetLightMode(material);
-#if ALPHA_MAP_FROM == 2
+#if HASHED_ALPHA_TEST_ENABLE
+	material.alpha = alpha > hashedThreshold2 ? 0 : alpha;
+#elif ALPHA_MAP_FROM == 2
 	material.alpha = alpha;
 #else
 	material.alpha = alpha > ALPHA_THRESHOLD ? 0 : alpha;

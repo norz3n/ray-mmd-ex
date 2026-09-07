@@ -1,7 +1,9 @@
 texture TAAHistoryMap : RENDERCOLORTARGET <
 	float2 ViewPortRatio = {1.0, 1.0};
 	bool AntiAlias = false;
-	string Format = "A8R8G8B8";
+	// Float16 so the blended history stays HDR: an A8R8G8B8 UNORM store clamps
+	// the Karis-weighted accumulator at 1.0 and flattens bloom-era highlights
+	string Format = "A16B16G16R16F";
 >;
 sampler TAAHistoryMapSamp = sampler_state {
 	texture = <TAAHistoryMap>;

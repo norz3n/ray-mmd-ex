@@ -126,7 +126,7 @@ const float customAMapLoopNum = 1.0;
 const float3 customB = float3(0.55, 0.50, 0.78);
 const float2 customBMapLoopNum = 1.0;
 
-// Hashed Alpha Testing (Wyman & McGuire 2017) — Soft anti-aliased hair strands with TAA
+// Hashed Alpha Testing (Wyman & McGuire 2017) - Soft anti-aliased hair strands with TAA
 #define HASHED_ALPHA_TEST_ENABLE 0
 #define HASHED_ALPHA_SCALE 1.0f
 

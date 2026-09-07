@@ -150,8 +150,9 @@ float4 Velocity_PS(VS_OUTPUT IN, uniform bool useToon) : COLOR0
 
 	if (Appear) velocity = 0;
 
-	// Scale and bias to [0, 1] range: 0.5 is 0 velocity
-	velocity = velocity + 0.5;
+	// Encode as Velocity * 0.25 + 0.5 (ref-code MotionBlur contract; the
+	// consumer decodes with (v - 0.5) * 4.0). 0.5 is 0 velocity.
+	velocity = velocity * 0.25 + 0.5;
 	return float4(velocity, mb_depth, (alpha >= TransparentThreshold));
 }
 

@@ -160,7 +160,7 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 #endif
 
 	// Energy-budget cap: Lambert + additive SSS (wrap/translucency) may not exceed the incident
-	// sun irradiance — dermal reflectance is applied once later, so any excess here would make
+	// sun irradiance - dermal reflectance is applied once later, so any excess here would make
 	// skin outshine white surfaces and turn it into a GI emitter brighter than its albedo allows
 	if (isSkinMat)
 	{
@@ -479,8 +479,8 @@ float4 ShadingTransparentPS(
 	lighting += (material.lightModel == SHADINGMODELID_GLASS ? 0.0f : iblDiffuse * material.albedo) + iblSpecular;
 #endif
 
-	// Water presets set customDataA == 0 (physical water IOR = 1.333, eta = 1 / 1.333 ≈ 0.75f).
-	// Glass presets set customDataA > 0 (typical glass IOR = 1.45-1.52, eta ≈ 0.69f).
+	// Water presets set customDataA == 0 (physical water IOR = 1.333, eta = 1 / 1.333 ~ 0.75f).
+	// Glass presets set customDataA > 0 (typical glass IOR = 1.45-1.52, eta ~ 0.69f).
 	float eta = (material.customDataA > 0.01f) ? 0.69f : 0.75f;
 	float refrMultiplier = (material.customDataA > 0.01f) ? material.customDataA : 0.8f;
 	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (refrMultiplier * 0.003f);
