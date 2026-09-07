@@ -136,7 +136,9 @@ void EnvLightingPS(
 	ShadingMaterial(material, V, diffuse, specular);
 
 	float3 diffuse2 = 0, specular2 = 0;
-	[branch]
+	// [flatten] required: ShadingMaterial -> FilterGeometricRoughness contains ddx/ddy,
+	// which is illegal inside a dynamic branch on ps_3_0 (X3528).
+	[flatten]
 	if (any(sum1))
 	{
 		ShadingMaterial(materialAlpha, V, diffuse2, specular2);
