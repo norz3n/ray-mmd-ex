@@ -16,15 +16,8 @@
 shared texture SSSUVLightMap: RENDERCOLORTARGET;
 shared texture SSSUVLightTemp: RENDERCOLORTARGET;
 shared texture SSSUVAlbedoMap: RENDERCOLORTARGET;
-shared texture ShadowMap: RENDERCOLORTARGET;
 
 float3 SunDirection : DIRECTION< string Object = "Light"; >;
-
-sampler SSSUVShadowSamp = sampler_state {
-	texture = <ShadowMap>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
-	AddressU = CLAMP; AddressV = CLAMP;
-};
 
 void UVSSSIrradianceVS(
 	in float4 Position : POSITION,
@@ -42,7 +35,8 @@ void UVSSSIrradianceVS(
 	oNormalO = Normal;
 	oMeshUV = Texcoord1;
 	oWorldPos = mul(Position, matWorld).xyz;
-	oUVPos = float4(Texcoord1.x * 2.0f - 1.0f, 1.0f - Texcoord1.y * 2.0f, 0.0f, 1.0f);
+	float2 uv = frac(Texcoord1);
+	oUVPos = float4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0f, 1.0f);
 }
 
 void UVSSSIrradiancePS(
@@ -65,15 +59,12 @@ void UVSSSIrradiancePS(
 #endif
 
 	float3 N = normalize(normalW);
+	// Pure direct sun irradiance on geometric surface in world space (shadow is applied deferred)
 	float irr = saturate(dot(N, -SunDirection));
-
-	float2 shadowUV = (screenPos.xy / screenPos.w) * float2(0.5f, -0.5f) + 0.5f;
-	float shadow = tex2Dlod(SSSUVShadowSamp, float4(shadowUV, 0, 0)).r;
 
 	float3 albedo = GetSubAlbedo(GetAlbedo(meshUV, worldPos, normalO), meshUV);
 	albedo *= 1.0f - GetMetalness(meshUV);
 
-	irr *= shadow;
 	oIrradiance = float4(irr, irr, irr, 1.0f);
 	oUVAlbedo = float4(albedo, 1.0f);
 }
@@ -93,6 +84,8 @@ void UVSSSIrradiancePS(
 		"Pass=DrawAlphaObject;"\
 		"RenderColorTarget0=SSSUVLightMap;"\
 		"RenderColorTarget1=SSSUVAlbedoMap;"\
+		"RenderColorTarget2=;"\
+		"RenderColorTarget3=;"\
 		"Pass=UVSSSIrradiance;"\
 		"RenderColorTarget0=;"\
 		"RenderColorTarget1=;"\
@@ -110,6 +103,7 @@ void UVSSSIrradiancePS(
 		pass UVSSSIrradiance {\
 			AlphaTestEnable = false; AlphaBlendEnable = false;\
 			ZEnable = false; ZWriteEnable = false;\
+			CullMode = NONE;\
 			VertexShader = compile vs_3_0 UVSSSIrradianceVS();\
 			PixelShader  = compile ps_3_0 UVSSSIrradiancePS();\
 		}\

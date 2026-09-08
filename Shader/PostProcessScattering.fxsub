@@ -128,7 +128,7 @@ float4 SSSGaussBlurPS(
 	                  : 0;
 	float3 sssUVAlbedo = tex2Dlod(SSSUVAlbedoMapSamp, float4(sssUVCoord, 0, 0)).rgb;
 	float3 sssUVErr = abs(sssUVAlbedo - albedo);
-	sssHasUV *= (sssUVErr.r + sssUVErr.g + sssUVErr.b < 0.06f) ? 1.0f : 0.0f;
+	sssHasUV *= (sssUVErr.r + sssUVErr.g + sssUVErr.b < 0.25f) ? 1.0f : 0.0f;
 #endif
 
 	// -------------------------------------------------------------------------
@@ -305,7 +305,7 @@ float4 SSSUVSpaceBlurPS(
 
 	float4 center = tex2Dlod(source, float4(coord, 0, 0));
 	float3 totalColor  = center.rgb * UV_CENTER;
-	float3 totalWeight = UV_CENTER;
+	float3 totalWeight = UV_CENTER * center.a;
 
 	// 0.8 texels at the neutral mSSSSScale (0.04) -> ~20 texel base radius;
 	// the far tap reaches ~32 texels. SSSS+ (0.02) doubles the footprint.

@@ -317,7 +317,7 @@ void ShadingOpacityPS(
 		float4 uvField = tex2Dlod(SSSUVLightMapSamp, float4(material.uvSSS, 0, 0));
 		float3 uvAlbedo = tex2Dlod(SSSUVAlbedoMapSamp, float4(material.uvSSS, 0, 0)).rgb;
 		float albedoErr = abs(uvAlbedo.r - MRT1.r) + abs(uvAlbedo.g - MRT1.g) + abs(uvAlbedo.b - MRT1.b);
-		uvSunValid = (uvField.a > 0.05f && albedoErr < 0.06f) ? 1.0f : 0.0f;
+		uvSunValid = (uvField.a > 0.05f && albedoErr < 0.25f) ? 1.0f : 0.0f;
 		uvSunBase = uvField.rgb;
 	}
 #endif

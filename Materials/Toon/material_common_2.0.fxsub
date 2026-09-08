@@ -2201,7 +2201,7 @@ GbufferParam MaterialPS(
 	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
 	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
 	float curvature = sqrt(deltaN_sq / max(deltaP_sq, 1e-3f));
-	material.customDataA = saturate(max(material.customDataA, curvature * 18.0f));
+	material.customDataA = saturate(max(material.customDataA, curvature * 2.0f));
 #endif
 	material.customDataB = GetCustomDataB(coord0);
 	material.emissive = GetEmissiveColor(coord0);
@@ -2289,7 +2289,7 @@ GbufferParam Material2PS(
 	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
 	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
 	float curvature = sqrt(deltaN_sq / max(deltaP_sq, 1e-3f));
-	material.customDataA = saturate(max(material.customDataA, curvature * 18.0f));
+	material.customDataA = saturate(max(material.customDataA, curvature * 2.0f));
 #endif
 	material.customDataB = GetCustomDataB(coord0);
 	material.emissive = GetEmissiveColor(coord0);
@@ -2311,10 +2311,103 @@ GbufferParam Material2PS(
 	return EncodeGbuffer(material, worldPos.w);
 }
 
-#if CUSTOM_ENABLE == 1
-// Skin family: the object-stage technique renders the G-buffer and then the
-// UV-space SSS irradiance pass (Shader/SSSUVSpace.fxsub).
-#include "../../../shader/SSSUVSpace.fxsub"
+#if SSSS_TEXSPACE && CUSTOM_ENABLE == 1
+// Skin family: Texture-space SSS direct sun irradiance pass
+shared texture SSSUVLightMap: RENDERCOLORTARGET;
+shared texture SSSUVLightTemp: RENDERCOLORTARGET;
+shared texture SSSUVAlbedoMap: RENDERCOLORTARGET;
+
+float3 SunDirection : DIRECTION< string Object = "Light"; >;
+
+void UVSSSIrradianceVS(
+	in float4 Position : POSITION,
+	in float3 Normal : NORMAL,
+	in float2 Texcoord1 : TEXCOORD0,
+	out float4 oScreenPos : TEXCOORD0,
+	out float3 oNormalW : TEXCOORD1,
+	out float3 oNormalO : TEXCOORD2,
+	out float2 oMeshUV : TEXCOORD3,
+	out float3 oWorldPos : TEXCOORD4,
+	out float4 oUVPos : POSITION)
+{
+	oScreenPos = mul(Position, matWorldViewProject);
+	oNormalW = normalize(mul(Normal, (float3x3)matWorld));
+	oNormalO = Normal;
+	oMeshUV = Texcoord1;
+	oWorldPos = mul(Position, matWorld).xyz;
+	float2 uv = frac(Texcoord1);
+	oUVPos = float4(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f, 0.0f, 1.0f);
+}
+
+void UVSSSIrradiancePS(
+	in float4 screenPos : TEXCOORD0,
+	in float3 normalW : TEXCOORD1,
+	in float3 normalO : TEXCOORD2,
+	in float2 meshUV : TEXCOORD3,
+	in float3 worldPos : TEXCOORD4,
+	out float4 oIrradiance : COLOR0,
+	out float4 oUVAlbedo : COLOR1)
+{
+	float alpha = GetAlpha(meshUV);
+#if HASHED_ALPHA_TEST_ENABLE
+	clip(alpha - HashedAlphaThreshold(worldPos, HASHED_ALPHA_SCALE));
+#else
+	clip(alpha - ALPHA_THRESHOLD);
+#endif
+#if ALPHA_MAP_FROM == 2
+	clip(-1);
+#endif
+
+	float3 N = normalize(normalW);
+	// Pure direct sun irradiance on geometric surface in world space (shadow is applied deferred)
+	float irr = saturate(dot(N, -SunDirection));
+
+	float3 albedo = GetSubAlbedo(GetAlbedo(meshUV, worldPos, normalO), meshUV);
+	albedo *= 1.0f - GetMetalness(meshUV);
+
+	oIrradiance = float4(irr, irr, irr, 1.0f);
+	oUVAlbedo = float4(albedo, 1.0f);
+}
+
+#define OBJECT_TEC(name, mmdpass)\
+	technique name<string MMDPass = mmdpass;\
+	string Script =\
+		"RenderColorTarget0=;"\
+		"RenderColorTarget1=Gbuffer2RT;"\
+		"RenderColorTarget2=Gbuffer3RT;"\
+		"RenderColorTarget3=Gbuffer4RT;"\
+		"Pass=DrawObject;"\
+		"RenderColorTarget0=Gbuffer5RT;"\
+		"RenderColorTarget1=Gbuffer6RT;"\
+		"RenderColorTarget2=Gbuffer7RT;"\
+		"RenderColorTarget3=Gbuffer8RT;"\
+		"Pass=DrawAlphaObject;"\
+		"RenderColorTarget0=SSSUVLightMap;"\
+		"RenderColorTarget1=SSSUVAlbedoMap;"\
+		"RenderColorTarget2=;"\
+		"RenderColorTarget3=;"\
+		"Pass=UVSSSIrradiance;"\
+		"RenderColorTarget0=;"\
+		"RenderColorTarget1=;"\
+	;>{\
+		pass DrawObject {\
+			AlphaTestEnable = false; AlphaBlendEnable = false;\
+			VertexShader = compile vs_3_0 MaterialVS();\
+			PixelShader  = compile ps_3_0 MaterialPS();\
+		}\
+		pass DrawAlphaObject {\
+			AlphaTestEnable = false; AlphaBlendEnable = false;\
+			VertexShader = compile vs_3_0 MaterialVS();\
+			PixelShader  = compile ps_3_0 Material2PS();\
+		}\
+		pass UVSSSIrradiance {\
+			AlphaTestEnable = false; AlphaBlendEnable = false;\
+			ZEnable = false; ZWriteEnable = false;\
+			CullMode = NONE;\
+			VertexShader = compile vs_3_0 UVSSSIrradianceVS();\
+			PixelShader  = compile ps_3_0 UVSSSIrradiancePS();\
+		}\
+	}
 #else
 #define OBJECT_TEC(name, mmdpass)\
 	technique name<string MMDPass = mmdpass;\

@@ -192,25 +192,23 @@ float ApproximateHG(float cosTheta, float g)
 }
 
 /**
- * Multi-spectral Subsurface Scattering (Penner & Borshukov, upstream-exact).
- * Transmittance color comes exclusively from material.customDataB (authored,
- * uniform per material) - never synthesized from texture albedo: albedo-derived
- * SSS color makes the terminator response vary patchily across blush/shadow
- * makeup zones of the skin texture.
+ * Multi-spectral Subsurface Scattering (Penner & Borshukov).
+ * Backlit diffuse transmission through thin organic features (ears, nose wings,
+ * fingers) when illuminated from behind (nl < 0). Strictly zero on the lit
+ * hemisphere (nl >= 0) to avoid double-counting with pre-integrated diffuse
+ * reflectance and edge-curvature blotches on the lit face.
  */
 float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 {
 	float nl = dot(N, L);
+	if (nl >= 0.0f)
+		return 0;
 
-	float pndl = saturate( nl);
-	float nndl = saturate(-nl);
+	float backlight = saturate(-nl);
+	float ir = saturate(material.customDataA * SKIN_SSS_MFP_SCALE);
+	float transmission = pow(backlight, 2.0f) * saturate(ir * 1.5f);
 
-	// SKIN_SSS_MFP_SCALE stretches the authored "inverse radius" so one knob
-	// pushes the SSS wrap deeper across the whole model
-	float ir = material.customDataA * SKIN_SSS_MFP_SCALE;
-	float3 sss = material.customDataB * pow2(1.0 - pndl) * pow(1.0 - nndl, 3.0 / (ir + 0.001)) * saturate(ir - 0.04);
-
-	return sss;
+	return material.customDataB * transmission;
 }
 
 /**
@@ -280,16 +278,17 @@ float SkinRotatedNoL(float unClampedNoL, float surfaceShadow)
  * Analytic pre-integrated skin (upstream-exact polynomial of the Jimenez LUT).
  * Smooth in BOTH the half-Lambert remapped nl and the curvature remap - no
  * saturation-driven piecewise terms, no kinks at the terminator, no probes.
- * curvatures enter only as a coordinate of the curve, keeping the response
+ * Curvatures enter only as a coordinate of the curve, keeping the response
  * scale-independent across models of different sizes.
+ * Returns the full diffuse BRDF response (normalized to 1.0 on front-lit surfaces).
  * `nlOverride` (optional, unclamped dot(N,L)) lets e.g. SkinRotatedNoL drive
  * the terminator instead of the raw geometric dot product.
  */
 float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L, float nlOverride = -2.0f)
 {
 	float nl = (nlOverride > -1.5f) ? saturate(nlOverride * 0.5f + 0.5f) : saturate(dot(N, L) * 0.5f + 0.5f);
-	float curvature = material.customDataA * SKIN_SSS_MFP_SCALE;
-	float curva = (1.0 / madd(curvature, 0.5 - 0.0625, 0.0625) - 2.0) / (16.0 - 2.0);
+	float curvature = saturate(material.customDataA * SKIN_SSS_MFP_SCALE);
+	float curva = saturate((1.0 / madd(curvature, 0.5 - 0.0625, 0.0625) - 2.0) / (16.0 - 2.0));
 	float oneMinusCurva = 1.0 - curva;
 
 	float3 rangeMin = float3(0.0, 0.3, 0.3);
@@ -315,9 +314,9 @@ float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, floa
 
 	float oneMinusCurva2 = oneMinusCurva * oneMinusCurva;
 
-	float3 brdf = lerp(curve1, curve2, madd(oneMinusCurva2, -1.0 * oneMinusCurva2, 1.0));
+	float3 brdf = lerp(curve1, curve2, saturate(madd(oneMinusCurva2, -1.0 * oneMinusCurva2, 1.0)));
 
-	return material.customDataB * brdf;
+	return brdf;
 }
 
 float BurleyBRDF(float nl, float nv, float vh, float roughness)

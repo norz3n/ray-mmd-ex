@@ -325,6 +325,10 @@ float Script : STANDARDSGLOBAL<
 
 technique DeferredLighting<
 	string Script =
+#if SSSS_QUALITY && SSSS_TEXSPACE
+	"RenderColorTarget0=SSSUVLightMap; ClearSetColor=BackColor; Clear=Color;"
+	"RenderColorTarget0=SSSUVAlbedoMap; ClearSetColor=BackColor; Clear=Color;"
+#endif
 	"RenderColorTarget=ScnMap;"
 	"RenderDepthStencilTarget=DepthBuffer;"
 	"ClearSetColor=BackColor;"

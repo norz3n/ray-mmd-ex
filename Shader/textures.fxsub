@@ -392,31 +392,31 @@ sampler ShadowMapSampTemp = sampler_state {
 // the Christensen-Burley profile (WRAP addressing keeps the diffusion seamless
 // across the UV atlas border and around island edges).
 #if SSSS_QUALITY && SSSS_TEXSPACE
-texture SSSUVLightMap : RENDERCOLORTARGET<
+shared texture SSSUVLightMap : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "A16B16G16R16F";
 >;
-texture SSSUVLightTemp : RENDERCOLORTARGET<
+shared texture SSSUVLightTemp : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "A16B16G16R16F";
 >;
-texture SSSUVAlbedoMap : RENDERCOLORTARGET<
+shared texture SSSUVAlbedoMap : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "A8R8G8B8";
 >;
 sampler SSSUVLightMapSamp = sampler_state {
 	texture = <SSSUVLightMap>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
-	AddressU = WRAP; AddressV = WRAP;
+	AddressU = CLAMP; AddressV = CLAMP;
 };
 sampler SSSUVLightMapSampTemp = sampler_state {
 	texture = <SSSUVLightTemp>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
-	AddressU = WRAP; AddressV = WRAP;
+	AddressU = CLAMP; AddressV = CLAMP;
 };
 sampler SSSUVAlbedoMapSamp = sampler_state {
 	texture = <SSSUVAlbedoMap>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 #endif
