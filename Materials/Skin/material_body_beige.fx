@@ -121,6 +121,7 @@ const float customAMapLoopNum = 1.0;
 #define CUSTOM_B_MAP_APPLY_SCALE 0
 #define CUSTOM_B_MAP_FILE "custom.png"
 
-const float3 customB = pow(float3(238, 104, 94) / 255, 1.0 / 2.2);
+// SSS transmittance color in sRGB — GetCustomDataB applies srgb2linear() internally.
+const float3 customB = float3(238, 104, 94) / 255.0;
 
 #include "../material_common_2.0.fxsub"

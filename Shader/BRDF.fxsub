@@ -63,19 +63,10 @@ float ComputeAmbientMicroOcclusion(float nl, float ao)
 // Skin / subsurface: artist-facing knobs ported from UE ShadingModels.ush
 // ---------------------------------------------------------------------------
 
-// Skin SSS style: 0 = pre-integrated Jimenez LUT polynomial (default),
-// 1 = UE's cheap artist toolchain (SubsurfaceBxDF cheat: WrappedDiffuse +
-// BackScatter + InScatter + HSV-luminance-preserving hue-shifted transmission).
-#ifndef SKIN_SSS_STYLE
-#define SKIN_SSS_STYLE 0
-#endif
-
-// [UE mobile skin] Pokey skin through cast shadows: NoL is backed off by the
-// shadow factor so the terminator rises inside dark shadow regions.
-// 0 = off (default), 1 = on.
-#ifndef SKIN_SHADOW_ROTATE
-#define SKIN_SHADOW_ROTATE 0
-#endif
+// SSS toolchain is the UE ShadingModels.ush artist path only (SubsurfaceBxDF
+// cheat: WrappedDiffuse + BackScatter + InScatter + HSV-luminance-preserving
+// hue-shifted transmission). The pre-integrated Jimenez LUT polynomial and the
+// Penner translucency add have been removed.
 
 // Authorable dual-lobe skin specular (cf. SubsurfaceProfileCommon.ush: the two
 // lobe widths and the mix are profile data, not hard constants). Defaults
@@ -118,7 +109,7 @@ float ComputeAmbientMicroOcclusion(float nl, float ao)
 #endif
 
 // Global mean-free-path multiplier: >1 pushes SSS light deeper (wider wraps,
-// longer penetration), <1 shrinks it. Applies to both skin styles.
+// longer penetration), <1 shrinks it.
 #ifndef SKIN_SSS_MFP_SCALE
 #define SKIN_SSS_MFP_SCALE 1.0
 #endif
@@ -192,26 +183,6 @@ float ApproximateHG(float cosTheta, float g)
 }
 
 /**
- * Multi-spectral Subsurface Scattering (Penner & Borshukov).
- * Backlit diffuse transmission through thin organic features (ears, nose wings,
- * fingers) when illuminated from behind (nl < 0). Strictly zero on the lit
- * hemisphere (nl >= 0) to avoid double-counting with pre-integrated diffuse
- * reflectance and edge-curvature blotches on the lit face.
- */
-float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
-{
-	float nl = dot(N, L);
-	if (nl >= 0.0f)
-		return 0;
-
-	float backlight = saturate(-nl);
-	float ir = saturate(material.customDataA * SKIN_SSS_MFP_SCALE);
-	float transmission = pow(backlight, 2.0f) * saturate(ir * 1.5f);
-
-	return material.customDataB * transmission;
-}
-
-/**
  * [ShadingModels.ush:716 SubsurfaceBxDF] The classic UE artist cheat SSS:
  *   - WrappedDiffuse with (w=1/3, n=1.5): normal-dependence of the SSS lobe is
  *     one authored scalar (material.customDataA: 0 = none, 1 = strong).
@@ -263,60 +234,6 @@ float3 SubsurfaceShadingBacklitGlow(MaterialParam material, float3 N, float3 L, 
 	// Gate into the past-light hemisphere: the glow only exists when light hits
 	// the back of the feature
 	return material.customDataB * material.albedo * (phase * SKIN_BACKLIT_STRENGTH * saturate(-dot(N, L) + 0.1f));
-}
-
-// [ShadingModels.ush:617-620, mobile skin] Pokey skin through cast shadows:
-// the unclamped NoL is backed off by the shadow factor inside dark shadow
-// regions so the terminator rises and skin reads as lit through thin shadow.
-float SkinRotatedNoL(float unClampedNoL, float surfaceShadow)
-{
-	float shadowFactor = 1.0f - sqrt(max(surfaceShadow, 0.0f));
-	return max(unClampedNoL - max(2.0f * unClampedNoL, 0.4f) * shadowFactor, -1.0f);
-}
-
-/**
- * Analytic pre-integrated skin (upstream-exact polynomial of the Jimenez LUT).
- * Smooth in BOTH the half-Lambert remapped nl and the curvature remap - no
- * saturation-driven piecewise terms, no kinks at the terminator, no probes.
- * Curvatures enter only as a coordinate of the curve, keeping the response
- * scale-independent across models of different sizes.
- * Returns the full diffuse BRDF response (normalized to 1.0 on front-lit surfaces).
- * `nlOverride` (optional, unclamped dot(N,L)) lets e.g. SkinRotatedNoL drive
- * the terminator instead of the raw geometric dot product.
- */
-float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L, float nlOverride = -2.0f)
-{
-	float nl = (nlOverride > -1.5f) ? saturate(nlOverride * 0.5f + 0.5f) : saturate(dot(N, L) * 0.5f + 0.5f);
-	float curvature = saturate(material.customDataA * SKIN_SSS_MFP_SCALE);
-	float curva = saturate((1.0 / madd(curvature, 0.5 - 0.0625, 0.0625) - 2.0) / (16.0 - 2.0));
-	float oneMinusCurva = 1.0 - curva;
-
-	float3 rangeMin = float3(0.0, 0.3, 0.3);
-	float3 rangeMax = float3(1.0, 0.7, 0.7);
-	float3 offset = float3(0.0, 0.06, 0.06);
-	float3 t = saturate(madd(nl, 1.0 / (rangeMax - rangeMin), (offset + rangeMin) / (rangeMin - rangeMax)));
-	float3 lowerLine = (t * t) * float3(0.65, 0.5, 0.9);
-	lowerLine.r += 0.045;
-	lowerLine.b *= t.b;
-
-	float3 m1 = float3(1.75, 2.0, 1.97);
-	float3 m2 = float3(1.95, 2.0, 2.0);
-
-	float3 lerpMin = float3(0.0, 0.35, 0.35);
-	float3 lerpMax = float3(1.0, 0.7, 0.6);
-	float3 lerpT = saturate(madd(nl, 1.0 / (lerpMax - lerpMin), lerpMin / (lerpMin - lerpMax)));
-
-	float3 upperLine1 = saturate(madd(nl, m1, float3(0.99, 0.99, 0.99) - m1));
-	float3 upperLine2 = saturate(madd(nl, m2, float3(0.99, 0.99, 1.0) - m2));
-
-	float3 curve1 = lerp(lowerLine, upperLine1, lerpT * lerpT);
-	float3 curve2 = upperLine2;
-
-	float oneMinusCurva2 = oneMinusCurva * oneMinusCurva;
-
-	float3 brdf = lerp(curve1, curve2, saturate(madd(oneMinusCurva2, -1.0 * oneMinusCurva2, 1.0)));
-
-	return brdf;
 }
 
 float BurleyBRDF(float nl, float nv, float vh, float roughness)
@@ -890,19 +807,14 @@ float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, fl
  * authored transmittance response. No screen-space probes - light bleed is
  * shaped purely by the ndotl-based term, so no false-thickness artifacts can
  * be sourced from the G-buffer at all. `coord` keeps call-site signatures
- * intact and is unused. `ao` / `shadow` only feed the cheat style.
+ * intact and is unused. `ao` / `shadow` feed BackScatter and the transmission
+ * blend.
  */
 float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0), float ao = 1.0f, float shadow = 1.0f)
 {
 	[branch]
 	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
-	{
-#if SKIN_SSS_STYLE == 1
 		return SubsurfaceShadingCheatSkin(material, N, L, V, ao, shadow) + SubsurfaceShadingBacklitGlow(material, N, L, V);
-#else
-		return SubsurfaceShadingPennerSkin(material, N, L) + SubsurfaceShadingBacklitGlow(material, N, L, V);
-#endif
-	}
 	else
 		return 0;
 }
@@ -955,42 +867,14 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 			// Same as CEL: terminator from the geometry shadow only, AO must not shift the ramp edge
 			diffuse = ToonBasedShading(nl, vh, nv, toonShadow, material.specular, shadow, roughness, material.customDataA);
 	}
-	else if (isSkin)
-	{
-#if SKIN_SSS_STYLE == 1
-		// Cheat toolchain (UE SubsurfaceBxDF): standard wrapped diffuse here,
-		// the SSS/transmission terms are added by SubsurfaceShading
-		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
-#else
-		float nlSkin = nl;
-#if SKIN_SHADOW_ROTATE == 1
-		// Pokey skin through cast shadows (UE mobile skin)
-		nlSkin = SkinRotatedNoL(nl, shadow);
-#endif
-		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L, nlSkin) * diffuseOcclusion;
-#endif
-	}
 	else
 	{
+		// UE SubsurfaceBxDF toolchain: standard diffuse here, the SSS/transmission
+		// terms are added by SubsurfaceShading
 		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 	}
 #else
-	float3 diffuse = 0;
-	[branch]
-	if (isSkin)
-	{
-#if SKIN_SSS_STYLE == 1
-		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
-#else
-		float nlSkin = nl;
-#if SKIN_SHADOW_ROTATE == 1
-		nlSkin = SkinRotatedNoL(nl, shadow);
-#endif
-		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L, nlSkin) * diffuseOcclusion;
-#endif
-	}
-	else
-		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+	float3 diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 #endif
 
 	float3 specular = 0;

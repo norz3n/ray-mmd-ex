@@ -119,9 +119,9 @@ const float customAMapLoopNum = 1.0;
 #define CUSTOM_B_MAP_COLOR_FLIP 0
 #define CUSTOM_B_MAP_APPLY_SCALE 0
 #define CUSTOM_B_MAP_FILE "custom.png"
-#define SSS_SKIN_TRANSMITTANCE(x) exp((1 - saturate(x)) * float3(-8, -40, -64))
-
-const float3 customB = SSS_SKIN_TRANSMITTANCE(0.8);
+// SSS transmittance color in sRGB — GetCustomDataB applies srgb2linear() internally.
+// Deeper red-brown for darker skin tone (melanoderm): higher melanin absorption in G/B.
+const float3 customB = float3(210, 80, 70) / 255.0;
 const float2 customBMapLoopNum = 1.0;
 
 #include "../../material_common_2.0.fxsub"

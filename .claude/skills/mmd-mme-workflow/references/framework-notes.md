@@ -29,7 +29,7 @@ Key `ray.conf` switches include `SUN_LIGHT_ENABLE`, `SUN_SHADOW_QUALITY`, `CONTA
 ReForge-specific structure beyond stock ray-mmd:
 
 - `Materials/` is split into per-family folders (`Skin`, `Hair`, `Metallic`, `Cloth`, `ClearCoat`, `Eye`, `Emissive`, `Foliage`, `Subsurface`, `Transparent`, `Video`, `Programmable/Water|Wetness`) plus the shared `material_2.0.fx` front end.
-- `Shader/` holds post-process modules per effect (`PostProcessBloom.fxsub`, `PostProcessSSGI.fxsub`, `PostProcessOcclusion*.fxsub`, `ContactShadow.fxsub`, `PreIntegratedSkin.fxsub`, `ColorGrading.fxsub`, ...).
+- `Shader/` holds post-process modules per effect (`PostProcessBloom.fxsub`, `PostProcessSSGI.fxsub`, `PostProcessOcclusion*.fxsub`, `ContactShadow.fxsub`, `ColorGrading.fxsub`, ...).
 - Skin look baseline: SSSS defaults 0.04/0.02 with `SKIN_AO_STRENGTH 0.75` — treat as the approved artistic baseline when touching skin materials.
 
 Common ray risks:
