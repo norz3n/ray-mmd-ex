@@ -143,6 +143,227 @@ static float mDbgSSGIIntensity = max(mDbgSSGIIntensity1, mDbgSSGIIntensity2);
 static float mDbgSSGIConeAngle = max(mDbgSSGIConeAngle1, mDbgSSGIConeAngle2);
 static float mDbgSSGIBias      = max(mDbgSSGIBias1,      mDbgSSGIBias2);
 
+// ColorGradingController.pmx (Dedicated Studio Color Grading Controller)
+#define COLOR_GRADING_CONTROLLER_AVAILABLE 1
+
+// Panel 1: Master / Global
+float mCgContrastP1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Contrast+";>;
+float mCgContrastM1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Contrast-";>;
+float mCgSaturationP1  : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Saturation+";>;
+float mCgSaturationM1  : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Saturation-";>;
+float mCgGammaP1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Gamma+";>;
+float mCgGammaM1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Gamma-";>;
+float mCgExposureP1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Exposure+";>;
+float mCgExposureM1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Exposure-";>;
+float mCgVibranceP1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Vibrance+";>;
+float mCgVibranceM1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Vibrance-";>;
+float mCgHueP1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Hue+";>;
+float mCgHueM1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Hue-";>;
+
+float mCgContrastP2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "Contrast+";>;
+float mCgContrastM2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "Contrast-";>;
+float mCgSaturationP2  : CONTROLOBJECT<string name="ColorGradingController"; string item = "Saturation+";>;
+float mCgSaturationM2  : CONTROLOBJECT<string name="ColorGradingController"; string item = "Saturation-";>;
+float mCgGammaP2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "Gamma+";>;
+float mCgGammaM2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "Gamma-";>;
+float mCgExposureP2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "Exposure+";>;
+float mCgExposureM2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "Exposure-";>;
+float mCgVibranceP2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "Vibrance+";>;
+float mCgVibranceM2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "Vibrance-";>;
+float mCgHueP2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "Hue+";>;
+float mCgHueM2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "Hue-";>;
+
+// Panel 2: White Balance & Shadows (Lift)
+float mCgTemperatureP1 : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Temperature+";>;
+float mCgTemperatureM1 : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Temperature-";>;
+float mCgTintP1        : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Tint+";>;
+float mCgTintM1        : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Tint-";>;
+float mCgShadowRP1     : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowR+";>;
+float mCgShadowRM1     : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowR-";>;
+float mCgShadowGP1     : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowG+";>;
+float mCgShadowGM1     : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowG-";>;
+float mCgShadowBP1     : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowB+";>;
+float mCgShadowBM1     : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowB-";>;
+float mCgShadowContrastP1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowContrast+";>;
+float mCgShadowContrastM1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowContrast-";>;
+float mCgShadowSaturationP1 : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowSaturation+";>;
+float mCgShadowSaturationM1 : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowSaturation-";>;
+float mCgShadowLiftP1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowLift+";>;
+float mCgShadowLiftM1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "ShadowLift-";>;
+
+float mCgTemperatureP2 : CONTROLOBJECT<string name="ColorGradingController"; string item = "Temperature+";>;
+float mCgTemperatureM2 : CONTROLOBJECT<string name="ColorGradingController"; string item = "Temperature-";>;
+float mCgTintP2        : CONTROLOBJECT<string name="ColorGradingController"; string item = "Tint+";>;
+float mCgTintM2        : CONTROLOBJECT<string name="ColorGradingController"; string item = "Tint-";>;
+float mCgShadowRP2     : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowR+";>;
+float mCgShadowRM2     : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowR-";>;
+float mCgShadowGP2     : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowG+";>;
+float mCgShadowGM2     : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowG-";>;
+float mCgShadowBP2     : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowB+";>;
+float mCgShadowBM2     : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowB-";>;
+float mCgShadowContrastP2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowContrast+";>;
+float mCgShadowContrastM2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowContrast-";>;
+float mCgShadowSaturationP2 : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowSaturation+";>;
+float mCgShadowSaturationM2 : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowSaturation-";>;
+float mCgShadowLiftP2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowLift+";>;
+float mCgShadowLiftM2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "ShadowLift-";>;
+
+// Panel 3: Highlights (Gain) & Midtones (Gamma)
+float mCgHighlightRP1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightR+";>;
+float mCgHighlightRM1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightR-";>;
+float mCgHighlightGP1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightG+";>;
+float mCgHighlightGM1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightG-";>;
+float mCgHighlightBP1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightB+";>;
+float mCgHighlightBM1       : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightB-";>;
+float mCgHighlightContrastP1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightContrast+";>;
+float mCgHighlightContrastM1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightContrast-";>;
+float mCgHighlightSaturationP1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightSaturation+";>;
+float mCgHighlightSaturationM1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightSaturation-";>;
+float mCgHighlightGainP1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightGain+";>;
+float mCgHighlightGainM1    : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "HighlightGain-";>;
+float mCgMidtoneRP1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneR+";>;
+float mCgMidtoneRM1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneR-";>;
+float mCgMidtoneGP1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneG+";>;
+float mCgMidtoneGM1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneG-";>;
+float mCgMidtoneBP1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneB+";>;
+float mCgMidtoneBM1         : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneB-";>;
+float mCgMidtoneContrastP1  : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneContrast+";>;
+float mCgMidtoneContrastM1  : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneContrast-";>;
+float mCgMidtoneSaturationP1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneSaturation+";>;
+float mCgMidtoneSaturationM1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "MidtoneSaturation-";>;
+
+float mCgHighlightRP2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightR+";>;
+float mCgHighlightRM2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightR-";>;
+float mCgHighlightGP2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightG+";>;
+float mCgHighlightGM2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightG-";>;
+float mCgHighlightBP2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightB+";>;
+float mCgHighlightBM2       : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightB-";>;
+float mCgHighlightContrastP2: CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightContrast+";>;
+float mCgHighlightContrastM2: CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightContrast-";>;
+float mCgHighlightSaturationP2: CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightSaturation+";>;
+float mCgHighlightSaturationM2: CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightSaturation-";>;
+float mCgHighlightGainP2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightGain+";>;
+float mCgHighlightGainM2    : CONTROLOBJECT<string name="ColorGradingController"; string item = "HighlightGain-";>;
+float mCgMidtoneRP2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneR+";>;
+float mCgMidtoneRM2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneR-";>;
+float mCgMidtoneGP2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneG+";>;
+float mCgMidtoneGM2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneG-";>;
+float mCgMidtoneBP2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneB+";>;
+float mCgMidtoneBM2         : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneB-";>;
+float mCgMidtoneContrastP2  : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneContrast+";>;
+float mCgMidtoneContrastM2  : CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneContrast-";>;
+float mCgMidtoneSaturationP2: CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneSaturation+";>;
+float mCgMidtoneSaturationM2: CONTROLOBJECT<string name="ColorGradingController"; string item = "MidtoneSaturation-";>;
+
+// Panel 4: Global Balance & Film Presets
+float mCgBalanceRP1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BalanceR+";>;
+float mCgBalanceRM1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BalanceR-";>;
+float mCgBalanceGP1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BalanceG+";>;
+float mCgBalanceGM1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BalanceG-";>;
+float mCgBalanceBP1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BalanceB+";>;
+float mCgBalanceBM1   : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BalanceB-";>;
+float mCgTealOrangeP1 : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "TealOrange+";>;
+float mCgBleachBypassP1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "BleachBypass+";>;
+float mCgCrossProcessP1: CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "CrossProcess+";>;
+float mCgMonochromeP1 : CONTROLOBJECT<string name="ColorGradingController.pmx"; string item = "Monochrome+";>;
+
+float mCgBalanceRP2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "BalanceR+";>;
+float mCgBalanceRM2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "BalanceR-";>;
+float mCgBalanceGP2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "BalanceG+";>;
+float mCgBalanceGM2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "BalanceG-";>;
+float mCgBalanceBP2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "BalanceB+";>;
+float mCgBalanceBM2   : CONTROLOBJECT<string name="ColorGradingController"; string item = "BalanceB-";>;
+float mCgTealOrangeP2 : CONTROLOBJECT<string name="ColorGradingController"; string item = "TealOrange+";>;
+float mCgBleachBypassP2: CONTROLOBJECT<string name="ColorGradingController"; string item = "BleachBypass+";>;
+float mCgCrossProcessP2: CONTROLOBJECT<string name="ColorGradingController"; string item = "CrossProcess+";>;
+float mCgMonochromeP2 : CONTROLOBJECT<string name="ColorGradingController"; string item = "Monochrome+";>;
+
+// Combined Master / Global Grading Controls
+static float mContrastP_Comb   = max(mContrastP, max(mCgContrastP1, mCgContrastP2));
+static float mContrastM_Comb   = max(mContrastM, max(mCgContrastM1, mCgContrastM2));
+static float mSaturationP_Comb = max(mSaturationP, max(mCgSaturationP1, mCgSaturationP2));
+static float mSaturationM_Comb = max(mSaturationM, max(mCgSaturationM1, mCgSaturationM2));
+static float mGammaP_Comb      = max(mGammaP, max(mCgGammaP1, mCgGammaP2));
+static float mGammaM_Comb      = max(mGammaM, max(mCgGammaM1, mCgGammaM2));
+static float mExposureP_Comb   = max(mExposureP, max(mCgExposureP1, mCgExposureP2));
+static float mExposureM_Comb   = max(mExposureM, max(mCgExposureM1, mCgExposureM2));
+
+// Combined White Balance Controls
+static float mTemperatureP_Comb = max(mTemperatureP, max(mCgTemperatureP1, mCgTemperatureP2));
+static float mTemperatureM_Comb = max(mTemperatureM, max(mCgTemperatureM1, mCgTemperatureM2));
+static float mTintP             = max(mCgTintP1, mCgTintP2);
+static float mTintM             = max(mCgTintM1, mCgTintM2);
+static float mColorTint         = mTintP - mTintM;
+
+// Vibrance and Hue Rotation
+static float mVibranceP = max(mCgVibranceP1, mCgVibranceP2);
+static float mVibranceM = max(mCgVibranceM1, mCgVibranceM2);
+static float mColorVibrance = mVibranceP - mVibranceM;
+
+static float mHueP = max(mCgHueP1, mCgHueP2);
+static float mHueM = max(mCgHueM1, mCgHueM2);
+static float mColorHue = (mHueP - mHueM) * 3.14159265f;
+
+// Combined Color Balance
+static float mColBalanceRP_Comb = max(mColBalanceRP, max(mCgBalanceRP1, mCgBalanceRP2));
+static float mColBalanceRM_Comb = max(mColBalanceRM, max(mCgBalanceRM1, mCgBalanceRM2));
+static float mColBalanceGP_Comb = max(mColBalanceGP, max(mCgBalanceGP1, mCgBalanceGP2));
+static float mColBalanceGM_Comb = max(mColBalanceGM, max(mCgBalanceGM1, mCgBalanceGM2));
+static float mColBalanceBP_Comb = max(mColBalanceBP, max(mCgBalanceBP1, mCgBalanceBP2));
+static float mColBalanceBM_Comb = max(mColBalanceBM, max(mCgBalanceBM1, mCgBalanceBM2));
+
+// Shadows Grading (Lift)
+static float3 mShadowGainP = float3(max(mCgShadowRP1, mCgShadowRP2), max(mCgShadowGP1, mCgShadowGP2), max(mCgShadowBP1, mCgShadowBP2));
+static float3 mShadowGainM = float3(max(mCgShadowRM1, mCgShadowRM2), max(mCgShadowGM1, mCgShadowGM2), max(mCgShadowBM1, mCgShadowBM2));
+static float mShadowContrastP   = max(mCgShadowContrastP1, mCgShadowContrastP2);
+static float mShadowContrastM   = max(mCgShadowContrastM1, mCgShadowContrastM2);
+static float mShadowSaturationP = max(mCgShadowSaturationP1, mCgShadowSaturationP2);
+static float mShadowSaturationM = max(mCgShadowSaturationM1, mCgShadowSaturationM2);
+static float mShadowLiftP       = max(mCgShadowLiftP1, mCgShadowLiftP2);
+static float mShadowLiftM       = max(mCgShadowLiftM1, mCgShadowLiftM2);
+
+static float3 mShadowGain       = float3(1.0f, 1.0f, 1.0f) + (mShadowGainP - mShadowGainM) * 0.75f;
+static float mShadowContrast    = lerp(lerp(1.0f, 2.0f, mShadowContrastP), 0.5f, mShadowContrastM);
+static float mShadowSaturation  = lerp(lerp(1.0f, 2.0f, mShadowSaturationP), 0.0f, mShadowSaturationM);
+static float mShadowLift        = (mShadowLiftP - mShadowLiftM) * 0.25f;
+
+// Highlights Grading (Gain)
+static float3 mHighlightGainP   = float3(max(mCgHighlightRP1, mCgHighlightRP2), max(mCgHighlightGP1, mCgHighlightGP2), max(mCgHighlightBP1, mCgHighlightBP2));
+static float3 mHighlightGainM   = float3(max(mCgHighlightRM1, mCgHighlightRM2), max(mCgHighlightGM1, mCgHighlightGM2), max(mCgHighlightBM1, mCgHighlightBM2));
+static float mHighlightContrastP   = max(mCgHighlightContrastP1, mCgHighlightContrastP2);
+static float mHighlightContrastM   = max(mCgHighlightContrastM1, mCgHighlightContrastM2);
+static float mHighlightSaturationP = max(mCgHighlightSaturationP1, mCgHighlightSaturationP2);
+static float mHighlightSaturationM = max(mCgHighlightSaturationM1, mCgHighlightSaturationM2);
+static float mHighlightLevelP      = max(mCgHighlightGainP1, mCgHighlightGainP2);
+static float mHighlightLevelM      = max(mCgHighlightGainM1, mCgHighlightGainM2);
+
+static float3 mHighlightGain    = (float3(1.0f, 1.0f, 1.0f) + (mHighlightGainP - mHighlightGainM) * 0.75f) * lerp(lerp(1.0f, 2.0f, mHighlightLevelP), 0.25f, mHighlightLevelM);
+static float mHighlightContrast = lerp(lerp(1.0f, 2.0f, mHighlightContrastP), 0.5f, mHighlightContrastM);
+static float mHighlightSaturation = lerp(lerp(1.0f, 4.0f, mHighlightSaturationP), 0.0f, mHighlightSaturationM);
+
+// Midtones Grading (Gamma)
+static float3 mMidtoneGainP     = float3(max(mCgMidtoneRP1, mCgMidtoneRP2), max(mCgMidtoneGP1, mCgMidtoneGP2), max(mCgMidtoneBP1, mCgMidtoneBP2));
+static float3 mMidtoneGainM     = float3(max(mCgMidtoneRM1, mCgMidtoneRM2), max(mCgMidtoneGM1, mCgMidtoneGM2), max(mCgMidtoneBM1, mCgMidtoneBM2));
+static float mMidtoneContrastP  = max(mCgMidtoneContrastP1, mCgMidtoneContrastP2);
+static float mMidtoneContrastM  = max(mCgMidtoneContrastM1, mCgMidtoneContrastM2);
+static float mMidtoneSaturationP = max(mCgMidtoneSaturationP1, mCgMidtoneSaturationP2);
+static float mMidtoneSaturationM = max(mCgMidtoneSaturationM1, mCgMidtoneSaturationM2);
+
+static float3 mMidtoneGain      = float3(1.0f, 1.0f, 1.0f) + (mMidtoneGainP - mMidtoneGainM) * 0.75f;
+static float mMidtoneContrast   = lerp(lerp(1.0f, 2.0f, mMidtoneContrastP), 0.5f, mMidtoneContrastM);
+static float mMidtoneSaturation = lerp(lerp(1.0f, 2.0f, mMidtoneSaturationP), 0.0f, mMidtoneSaturationM);
+
+// Film Presets
+static float mTealOrange   = max(mCgTealOrangeP1, mCgTealOrangeP2);
+static float mBleachBypass = max(mCgBleachBypassP1, mCgBleachBypassP2);
+static float mCrossProcess = max(mCgCrossProcessP1, mCgCrossProcessP2);
+static float mMonochrome   = max(mCgMonochromeP1, mCgMonochromeP2);
+
+// Check if 3-way grading is engaged
+static bool mEnable3WayGrading = (any(mShadowGainP) || any(mShadowGainM) || mShadowContrastP > 0 || mShadowContrastM > 0 || mShadowSaturationP > 0 || mShadowSaturationM > 0 || mShadowLiftP > 0 || mShadowLiftM > 0 ||
+                                 any(mHighlightGainP) || any(mHighlightGainM) || mHighlightContrastP > 0 || mHighlightContrastM > 0 || mHighlightSaturationP > 0 || mHighlightSaturationM > 0 || mHighlightLevelP > 0 || mHighlightLevelM > 0 ||
+                                 any(mMidtoneGainP) || any(mMidtoneGainM) || mMidtoneContrastP > 0 || mMidtoneContrastM > 0 || mMidtoneSaturationP > 0 || mMidtoneSaturationM > 0);
+
 static float mSSAOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSAOP), 0, mSSAOM);
 static float mSSAORadius = lerp(lerp(1.0, 2.0, mSSAORadiusP), 0.5, mSSAORadiusM);
 static float mSSDOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSDOP), 0, mSSDOM);
@@ -157,20 +378,20 @@ static float mSSRSmoothness = mSSRSmoothnessDefault;
 static float mSSRBrightness = mSSRBrightnessDefault;
 static float mSSRFresnel = mSSRFresnelDefault;
 static float mSunIntensity = lerp(lerp(mLightIntensityMin, mLightIntensityMax, mSunLightP), 0, mSunLightM);
-static float mExposure = lerp(lerp(mExposureMin, mExposureMax, mExposureP), 0, mExposureM);
+static float mExposure = lerp(lerp(mExposureMin, mExposureMax, mExposureP_Comb), 0, mExposureM_Comb);
 static float mBloomRadius = lerp(lerp(2.2, 10, mBloomRadiusP), 0.1, mBloomRadiusM);
 static float mBloomThreshold = (1.0 - mBloomThresholdP) / (mBloomThresholdP + 1e-5);
-static float mColorContrast = lerp(lerp(1, 2, mContrastP), 0.5, mContrastM);
-static float mColorSaturation = lerp(lerp(1, 2, mSaturationP), 0.0, mSaturationM);
-static float mColorGamma = lerp(lerp(1.0, 0.45, mGammaP), 2.2, mGammaM);
-static float mColorTemperature = lerp(lerp(mTemperature, 1000, mTemperatureP), 40000, mTemperatureM);
+static float mColorContrast = lerp(lerp(1, 2, mContrastP_Comb), 0.5, mContrastM_Comb);
+static float mColorSaturation = lerp(lerp(1, 2, mSaturationP_Comb), 0.0, mSaturationM_Comb);
+static float mColorGamma = lerp(lerp(1.0, 0.45, mGammaP_Comb), 2.2, mGammaM_Comb);
+static float mColorTemperature = lerp(lerp(mTemperature, 1000, mTemperatureP_Comb), 40000, mTemperatureM_Comb);
 static float mFstop = lerp(lerp(5.6, 32.0, mFstopP), 1.0, mFstopM);
 static float mFocalDistance = lerp(lerp(1, 10.0, mFocalDistanceP), -10.0, mFocalDistanceM);
 static float mFocalRegion = lerp(0.0, 10.0, mFocalRegionP);
 static float mBladeCount = lerp(10, 5, mBladeCountM);
 static float3 mColorShadowSunP = pow(float3(mSunShadowRP, mSunShadowGP, mSunShadowBP), 2);
-static float3 mColorBalanceP = float3(mColBalanceRP, mColBalanceGP, mColBalanceBP);
-static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceBM);
+static float3 mColorBalanceP = float3(mColBalanceRP_Comb, mColBalanceGP_Comb, mColBalanceBP_Comb);
+static float3 mColorBalanceM = float3(mColBalanceRM_Comb, mColBalanceGM_Comb, mColBalanceBM_Comb);
 #if WATER_CAUSTICS_ENABLE
 static float mCstIntensityP   = max(mCstIntensityP1, mCstIntensityP2);
 static float mCstIntensityM   = max(mCstIntensityM1, mCstIntensityM2);

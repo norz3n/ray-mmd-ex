@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.4) :
+Reforge Exclusive Features (through v1.20.9) :
 ------------
 
 **Direct Screen-Space Core**
@@ -70,6 +70,7 @@ Reforge Exclusive Features (through v1.20.4) :
 * **Detail Normal Maps & Micro-Surface Layering**: distance-faded micro-surface normal overlay (skin pores, fabric weave, rock grit) composited via Reoriented Normal Mapping (RNM).
 
 **Post-Processing & Anti-Aliasing**
+* **Studio Color Grading Engine & Dedicated Controller (`ColorGradingController.pmx`)**: built-in linear HDR 3-way split-toning (Lift/Gamma/Gain for Shadows, Midtones, and Highlights) with perceptual Naka-Rushton luma partitioning, 2D white balance (Correlated Color Temperature + Green/Magenta Tint), smart skin-preserving Vibrance, branchless 3D Rodrigues Hue rotation, and cinematic creative presets (Teal & Orange, Bleach Bypass, Cross Process, Monochrome) controlled via a dedicated 60-morph PMX controller.
 * **G-DLAA Anti-Aliasing**: hybrid geometric and directionally adaptive anti-aliasing (`AA_QUALITY 7`) preserving sharp silhouette edges.
 * **Temporal Anti-Aliasing (TAA)**: 5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history.
 * **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.

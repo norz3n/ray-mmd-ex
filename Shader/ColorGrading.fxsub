@@ -40,6 +40,95 @@ float3 ColorTemperature(float3 color, float kelvin)
 	return color * balance;
 }
 
+float3 ColorTint(float3 color, float tint)
+{
+	float3 tintVec = float3(1.0f + tint * 0.5f, 1.0f - tint * 0.5f, 1.0f + tint * 0.5f);
+	float lumFactor = dot(tintVec, float3(0.299f, 0.587f, 0.114f));
+	tintVec /= max(1e-4f, lumFactor);
+	return max(0.0f, color * tintVec);
+}
+
+float3 ColorVibrance(float3 color, float vibrance)
+{
+	float lum = luminance(color);
+	float maxC = max(color.r, max(color.g, color.b));
+	float minC = min(color.r, min(color.g, color.b));
+	float sat = (maxC - minC) / max(maxC, 1e-4f);
+	float satFactor = 1.0f + vibrance * (1.0f - sat);
+	return max(0.0f, lerp(lum.xxx, color, satFactor));
+}
+
+float3 ColorHueShift(float3 color, float angle)
+{
+	const float3 k = float3(0.577350269f, 0.577350269f, 0.577350269f);
+	float sinA, cosA;
+	sincos(angle, sinA, cosA);
+	return max(0.0f, color * cosA + cross(k, color) * sinA + k * dot(k, color) * (1.0f - cosA));
+}
+
+float3 ColorGradeTonalZone(float3 color, float saturation, float contrast, float3 gain, float lift)
+{
+	float lum = luminance(color);
+	color = max(0.0f, lerp(lum.xxx, color, saturation));
+	color = pow(max(1e-4f, color * (1.0f / 0.18f)), contrast) * 0.18f;
+	color = color * gain + lift;
+	return max(0.0f, color);
+}
+
+float3 ColorGrade3Way(
+	float3 color,
+	float shadowSat, float shadowCont, float3 shadowGain, float shadowLift,
+	float midtoneSat, float midtoneCont, float3 midtoneGain,
+	float highlightSat, float highlightCont, float3 highlightGain,
+	float shadowMax, float highlightMin)
+{
+	float luma = luminance(color);
+	// Perceptual luma compression (Naka-Rushton curve: maps middle gray 0.18 to 0.50)
+	float pLuma = luma / (luma + 0.18f);
+
+	float weightShadows = 1.0f - smoothstep(0.0f, shadowMax, pLuma);
+	float weightHighlights = smoothstep(highlightMin, 0.80f, pLuma);
+	float weightMidtones = saturate(1.0f - weightShadows - weightHighlights);
+
+	float3 colorShadows = ColorGradeTonalZone(color, shadowSat, shadowCont, shadowGain, shadowLift);
+	float3 colorMidtones = ColorGradeTonalZone(color, midtoneSat, midtoneCont, midtoneGain, 0.0f);
+	float3 colorHighlights = ColorGradeTonalZone(color, highlightSat, highlightCont, highlightGain, 0.0f);
+
+	return colorShadows * weightShadows + colorMidtones * weightMidtones + colorHighlights * weightHighlights;
+}
+
+float3 ApplyTealOrange(float3 color, float amount)
+{
+	float lum = luminance(color);
+	float3 teal = float3(0.12f, 0.55f, 0.70f);
+	float3 orange = float3(1.10f, 0.65f, 0.18f);
+	float3 targetColor = lerp(teal * (lum * 2.0f), orange * (lum * 1.5f), smoothstep(0.05f, 0.65f, lum));
+	return max(0.0f, lerp(color, targetColor, amount * 0.75f));
+}
+
+float3 ApplyBleachBypass(float3 color, float amount)
+{
+	float lum = luminance(color);
+	float3 blend = (lum < 0.5f) ? (2.0f * color * lum) : (1.0f - 2.0f * (1.0f - color) * (1.0f - lum));
+	float3 bleach = lerp(blend, lum.xxx, 0.30f);
+	return max(0.0f, lerp(color, bleach, amount));
+}
+
+float3 ApplyCrossProcess(float3 color, float amount)
+{
+	float3 cp;
+	cp.r = color.r < 0.5f ? 2.0f * color.r * color.r : 1.0f - 2.0f * (1.0f - color.r) * (1.0f - color.r);
+	cp.g = color.g * 1.15f;
+	cp.b = color.b < 0.5f ? color.b * 1.35f : 1.0f - (1.0f - color.b) * 0.75f;
+	return max(0.0f, lerp(color, cp, amount * 0.70f));
+}
+
+float3 ApplyMonochrome(float3 color, float amount)
+{
+	float lum = dot(color, float3(0.299f, 0.587f, 0.114f));
+	return lerp(color, lum.xxx, amount);
+}
+
 float3 ColorCorrect(
 	float3 color,
 	float colorSaturation,

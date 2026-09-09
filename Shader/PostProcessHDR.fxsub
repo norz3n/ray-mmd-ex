@@ -146,7 +146,34 @@ float4 HDRTonemappingPS(in float4 coord: TEXCOORD0, uniform sampler source) : CO
 #endif
 
 	color = ColorTemperature(color, mColorTemperature);
+	if (abs(mColorTint) > 1e-4f)
+		color = ColorTint(color, mColorTint);
+	if (abs(mColorVibrance) > 1e-4f)
+		color = ColorVibrance(color, mColorVibrance);
+	if (abs(mColorHue) > 1e-4f)
+		color = ColorHueShift(color, mColorHue);
+
+	if (mEnable3WayGrading)
+	{
+		color = ColorGrade3Way(
+			color,
+			mShadowSaturation, mShadowContrast, mShadowGain, mShadowLift,
+			mMidtoneSaturation, mMidtoneContrast, mMidtoneGain,
+			mHighlightSaturation, mHighlightContrast, mHighlightGain,
+			mColorGradingShadowMax, mColorGradingHighlightMin);
+	}
+
 	color = ColorCorrect(color, mColorSaturation, mColorContrast, mColorGamma, mColorBalanceP, mColorBalanceM);
+
+	if (mTealOrange > 1e-4f)
+		color = ApplyTealOrange(color, mTealOrange);
+	if (mBleachBypass > 1e-4f)
+		color = ApplyBleachBypass(color, mBleachBypass);
+	if (mCrossProcess > 1e-4f)
+		color = ApplyCrossProcess(color, mCrossProcess);
+	if (mMonochrome > 1e-4f)
+		color = ApplyMonochrome(color, mMonochrome);
+
 	color = ColorVignette(color, coord.xy);
 	color = ColorToneMapping(color);
 
