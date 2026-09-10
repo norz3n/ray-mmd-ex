@@ -82,15 +82,28 @@ float3 ImageBasedLightSubsurface(MaterialParam material, float3 N, float3 prefil
 	return scattering * mEnvIntensitySSS;
 }
 
-float3 ComputeAnisotropyDominantDir(float3 N, float3 V, float anisotropy, float shift)
+float3 ComputeAnisotropyDominantDir(float3 N, float3 V, float anisotropy, float shift, float roughness = 0.5f)
 {
-	float3 X = normalize(cross(N, float3(0,1,0)) + N * shift);
-	float3 Y = normalize(cross(N, X) + N * shift);
+	float3 up = (abs(N.y) > 0.99f) ? float3(1, 0, 0) : float3(0, 1, 0);
+	float3 X = normalize(cross(N, up));
+	float3 Y = normalize(cross(N, X));
 
-	float3 ax = cross(-V, Y);
-	float3 ay = cross(ax, Y);
+	if (abs(shift) > 1e-4f)
+	{
+		float angle = shift * 6.2831853f;
+		float sinA, cosA;
+		sincos(angle, sinA, cosA);
+		float3 rotatedX = X * cosA + Y * sinA;
+		Y = -X * sinA + Y * cosA;
+		X = rotatedX;
+	}
 
-	float3 bentNormal = normalize(lerp(N, ay, anisotropy * anisotropy));
+	float3 anisotropicDir = (anisotropy >= 0.0f) ? Y : X;
+	float3 anisotropicT   = cross(anisotropicDir, V);
+	float3 anisotropicN   = cross(anisotropicT, anisotropicDir);
+
+	float stretch = abs(anisotropy) * saturate(5.0f * roughness);
+	float3 bentNormal = normalize(lerp(N, anisotropicN, stretch));
 
 	return reflect(-V, bentNormal);
 }
@@ -128,7 +141,7 @@ void ShadingMaterial(MaterialParam material, float3 worldView, out float3 diffus
 
 	if (material.lightModel == SHADINGMODELID_ANISOTROPY)
 	{
-		R = ComputeAnisotropyDominantDir(N, V, material.customDataA, material.customDataB.r);
+		R = ComputeAnisotropyDominantDir(N, V, material.customDataA, material.customDataB.r, roughness);
 	}
 
 	float2 coord1 = ComputeSphereCoord(N);

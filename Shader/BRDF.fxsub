@@ -480,6 +480,45 @@ float3 SpecularBRDF_GGX(float nh, float nl, float vh, float nv, float roughness,
 	return fresnel * spec * energyCompensation;
 }
 
+/**
+ * [Lazarov 2013, "Getting More Physical in Call of Duty: Black Ops II"]
+ * Analytical polynomial approximation for the Environment BRDF split-sum DFG integral.
+ * Dual-polynomial curve fit for directional albedo scale and bias.
+ *
+ * @param roughness Linear perceptual surface roughness [0, 1]
+ * @param NoV       Cosine of angle between surface normal and view direction
+ * @return float2   (Scale, Bias) factors for specular color and F90 reflectance
+ */
+float2 EnvBRDFApproxLazarov(float roughness, float NoV)
+{
+	const float4 c0 = { -1.0f, -0.0275f, -0.572f, 0.022f };
+	const float4 c1 = { 1.0f, 0.0425f, 1.04f, -0.04f };
+	float4 r = roughness * c0 + c1;
+	float a004 = min(r.x * r.x, exp2(-9.28f * NoV)) * r.x + r.y;
+	return float2(-1.04f, 1.04f) * a004 + r.zw;
+}
+
+float3 EnvBRDFApprox(float3 specularColor, float roughness, float NoV)
+{
+	float2 AB = EnvBRDFApproxLazarov(roughness, NoV);
+	float3 f90 = ComputeSpecularMicroOcclusion(specularColor);
+	return specularColor * AB.x + f90 * AB.y;
+}
+
+/**
+ * Analytical energy transfer for ultra-rough microfacets (roughness > 0.95).
+ * As microfacets reach extreme roughness, specular scattering degenerates into
+ * diffuse-like hemispherically scattered light. Transfers the specular directional
+ * albedo integral (0.45 * SpecularColor) into the diffuse response and damps specular
+ * to eliminate microfacet highlights and shimmering on matte materials.
+ */
+void EnergyPreservingFullyRough(inout float3 diffuse, inout float3 specular, float3 specColor, float roughness)
+{
+	float fullyRoughFactor = saturate((roughness - 0.95f) * 20.0f);
+	diffuse += specColor * (0.45f * fullyRoughFactor);
+	specular *= (1.0f - fullyRoughFactor);
+}
+
 // Angular radius of the "sphere light" used by SphereMaxNoH for highlight
 // softening / geometric anti-aliasing. float knob -> runtime branch, the
 // compiler folds the constant case; 0 (default) = exact point/area light H,
@@ -585,9 +624,10 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 		T = rotatedT;
 	}
 
-	float aspect = sqrt(max(1.0f - anisotropic * 0.9f, 0.01f));
-	float ax = max(roughness / aspect, 0.001f);
-	float ay = max(roughness * aspect, 0.001f);
+	// [Kulla 2017, "Revisiting Physically Based Shading at Imageworks"]
+	// Linear anisotropic roughness parametrization along tangent and bitangent axes
+	float ax = max(roughness * (1.0f + anisotropic), 0.001f);
+	float ay = max(roughness * (1.0f - anisotropic), 0.001f);
 
 	bool isHair = any(shift.gb > 0.001f);
 
@@ -601,8 +641,8 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 		// Secondary highlight (TRT lobe - transmission bounce shifted towards tip, tinted by hair albedo)
 		float3 H_shift2 = normalize(H - N * (shift.b * 0.15f + 0.08f));
 		float r2 = saturate(roughness * 1.4f + 0.1f);
-		float ax2 = max(r2 / aspect, 0.001f);
-		float ay2 = max(r2 * aspect, 0.001f);
+		float ax2 = max(r2 * (1.0f + anisotropic), 0.001f);
+		float ay2 = max(r2 * (1.0f - anisotropic), 0.001f);
 		float d2 = pow2(dot(T, H_shift2) / ax2) + pow2(dot(B, H_shift2) / ay2) + nh * nh;
 		float spec2 = (1.0f / (ax2 * ay2 * max(d2 * d2, 1e-6f))) * NormalizationFactor;
 
@@ -834,16 +874,20 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 		return (float2x3)0;
 #endif
 
-	float3 H = normalize(V + L);
-
-	float nh = saturate(dot(N, H));
-	float vh = saturate(dot(V, H));
 	float nv = abs(dot(N, V)) + 1e-5h;
 	float lv = dot(L, V);
+
+	// Scalar half-vector evaluation (Karis 2013 / microfacet geometric invariant):
+	// evaluates NoH and VoH analytically without 3D vector normalization since |V|=1 and |L|=1
+	float InvLenH = rsqrt(2.0f + 2.0f * lv);
+	float nh = saturate((nl + nv) * InvLenH);
+	float vh = saturate(InvLenH + InvLenH * lv);
 
 	// [de Carpentier 2017] Optional sphere-light highlight softening / specular
 	// AA; identity no-op when SPEC_LIGHT_SIN_ALPHA = 0 (constant-folded)
 	SphereMaxNoH(nl, lv, nv, SPEC_LIGHT_SIN_ALPHA, nh, vh);
+
+	float3 H = (material.lightModel == SHADINGMODELID_ANISOTROPY) ? ((V + L) * InvLenH) : 0;
 
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001);
 	roughness = FilterGeometricRoughness(roughness, N);
@@ -892,7 +936,10 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	else if (material.lightModel == SHADINGMODELID_ANISOTROPY)
 		specular = SpecularBRDF_GGXAniso(N, H, nh, nl, vh, nv, material.specular, material.albedo, roughness, material.customDataA, material.customDataB, normalizeFactor);
 	else
+	{
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+		EnergyPreservingFullyRough(diffuse, specular, material.specular, roughness);
+	}
 
 #if TOON_ENABLE
 	// Stepped anime highlight: gate the GGX lobe into a crisp band keyed to the
@@ -912,20 +959,23 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	if (nl2 <= 0.0f)
 		return (float4)0;
 
-	float3 H = normalize(V + Ls);
+	float nlUnclamped = dot(N, Ls);
+	float vl = dot(Ls, V);
+	float nv = abs(dot(N, V)) + 1e-5h;
 
-	float nh  = saturate(dot(N, H));
-	float nl  = saturate(dot(N, Ls));
-	float vh  = saturate(dot(V, H));
-	float nv  = abs(dot(N, V)) + 1e-5h;
+	// Scalar half-vector evaluation without 3D vector normalization
+	float InvLenH = rsqrt(2.0f + 2.0f * vl);
+	float nh  = saturate((nlUnclamped + nv) * InvLenH);
+	float nl  = saturate(nlUnclamped);
+	float vh  = saturate(InvLenH + InvLenH * vl);
 
 	// [de Carpentier 2017] Optional sphere/area-light highlight softening;
 	// shaped by the specular direction Ls and a no-op when the knob is 0
-	float nlUnclamped = dot(N, Ls);
-	float vl = dot(Ls, V);
 	SphereMaxNoH(nlUnclamped, vl, nv, SPEC_LIGHT_SIN_ALPHA, nh, vh);
 	// Adopt the re-projected NoL (no-op when the knob is 0)
 	nl = saturate(max(nl, nlUnclamped));
+
+	float3 H = (material.lightModel == SHADINGMODELID_ANISOTROPY) ? ((V + Ls) * InvLenH) : 0;
 
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001);
 	roughness = FilterGeometricRoughness(roughness, N);
@@ -949,7 +999,10 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	else if (material.lightModel == SHADINGMODELID_ANISOTROPY)
 		specular = SpecularBRDF_GGXAniso(N, H, nh, nl, vh, nv, material.specular, material.albedo, roughness, material.customDataA, material.customDataB, normalizeFactor);
 	else
+	{
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+		EnergyPreservingFullyRough(diffuse, specular, material.specular, roughness);
+	}
 
 	return float4(diffuse * albedoScaling, specular) * nl2 * skinShadow;
 }
