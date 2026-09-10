@@ -595,15 +595,53 @@ void SphereMaxNoH(inout float nl, inout float vl, float nv, float SinAlpha, inou
 
 float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughness, float3 specular, float normalizeFactor)
 {
-	// Dual-lobe GGX model for organic skin, with the lobe widths and mix as
-	// authorable macros (cf. SubsurfaceProfileCommon; profile data not code):
+	// Dual-lobe GGX model for organic skin (cf. Jimenez et al. 2015):
 	// Lobe 1 (Base Dermal Layer): Broad, matte lobe representing subsurface reflection and micro-porosity
 	// Lobe 2 (Epidermal / Sebum Layer): Tight, sharper specular representing skin moisture and lipid coating
 	float r1 = saturate(roughness * SKIN_SPEC_LOBE0_SCALE + SKIN_SPEC_LOBE0_ADD);
 	float r2 = saturate(roughness * SKIN_SPEC_LOBE1_SCALE + SKIN_SPEC_LOBE1_ADD);
-	float3 lobe1 = SpecularBRDF_GGX(nh, nl, vh, nv, r1, specular, normalizeFactor);
-	float3 lobe2 = SpecularBRDF_GGX(nh, nl, vh, nv, r2, specular, normalizeFactor);
-	return lobe1 * SKIN_SPEC_LOBE0_MIX + lobe2 * SKIN_SPEC_LOBE1_MIX;
+
+	float m1 = r1 * r1;
+	float d1 = (nh * m1 - nh) * nh + 1.0f;
+	float D1 = m1 / (d1 * d1);
+
+	float m2 = r2 * r2;
+	float d2 = (nh * m2 - nh) * nh + 1.0f;
+	float D2 = m2 / (d2 * d2);
+
+	float D = (D1 * SKIN_SPEC_LOBE0_MIX + D2 * SKIN_SPEC_LOBE1_MIX) * normalizeFactor;
+
+	// Average roughness for Smith masking-shadowing evaluation (single Vis replaces duplicate evaluations)
+	float avgR = r1 * SKIN_SPEC_LOBE0_MIX + r2 * SKIN_SPEC_LOBE1_MIX;
+	float k = 1.0f - avgR;
+	float G = nl * (nv * k + avgR) + nv * (nl * k + avgR);
+	float spec = D * (0.5f / G);
+
+	float3 f0 = specular;
+	float3 f90 = ComputeSpecularMicroOcclusion(f0);
+	float3 fresnel = fresnelSchlickF(f0, f90, vh);
+
+	float3 energyCompensation = 1.0f + f0 * (avgR * (1.0f - avgR) * 0.65f);
+
+	return fresnel * spec * energyCompensation;
+}
+
+/**
+ * [Kajiya & Kay 1989 / Marschner et al.]
+ * Cylindrical volume diffuse attenuation for hair fibers with multiple-scattering wrap
+ * and shadow chromatic tinting.
+ */
+float3 KajiyaKayDiffuseAttenuation(float3 baseColor, float3 L, float3 V, float3 N, float shadow)
+{
+	float kajiyaDiffuse = 1.0f - abs(dot(N, L));
+
+	float3 fakeNormal = normalize(V - N * dot(V, N));
+	float noL_wrap = saturate((dot(fakeNormal, L) + 1.0f) * 0.25f);
+	float diffuseScatter = (1.0f / PI) * lerp(noL_wrap, kajiyaDiffuse, 0.33f);
+
+	float luma = dot(baseColor, float3(0.299f, 0.587f, 0.114f));
+	float3 scatterTint = pow(max(baseColor / max(luma, 1e-4f), 1e-4f), 1.0f - shadow);
+	return sqrt(baseColor) * diffuseScatter * scatterTint;
 }
 
 float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
@@ -813,11 +851,17 @@ float3 ThinFilmIridescence(float nv, float filmThickness = 380.0f, float filmIOR
 	return saturate(interference);
 }
 
+// Polynomial approximation of refraction blend factor for normal component of VoH with fixed Eta (1/1.5):
+float RefractBlendClearCoatApprox(float vh)
+{
+	return (0.63f - 0.22f * vh) * vh - 0.745f;
+}
+
 float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor, out float albedoScaling)
 {
 	float clearcoatRoughness = max(SmoothnessToRoughness(material.customDataA), 0.001);
 	
-	// ClearCoat layer has fixed IOR 1.5 (F0 = 0.04)
+	// ClearCoat top layer has fixed IOR 1.5 (F0 = 0.04)
 	float4 spec2 = SpecularBRDF_ClearCoat(nh, nl, vh, nv, clearcoatRoughness, 0.04, normalizeFactor);
 	float clearCoatFresnel = spec2.a;
 	float3 clearCoatSpecular = spec2.rgb;
@@ -832,29 +876,73 @@ float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, fl
 		clearCoatSpecular = lerp(clearCoatSpecular, clearCoatSpecular * iridColor * 2.2f, iridStrength);
 	}
 	
-	// Light that penetrates the clearcoat is attenuated by (1 - Fc)
+	// Analytical refraction through clearcoat (Eta = 1.0 / 1.5):
+	// propagates angle deflection to substrate without tracing secondary rays
+	float refFactor = RefractBlendClearCoatApprox(vh);
+	float refProj = refFactor * nh;
+	float nv_bottom = clamp(0.6667f * nv - refProj, 0.001f, 1.0f);
+	float nl_bottom = clamp(0.6667f * nl - refProj, 0.001f, 1.0f);
+	float vh_bottom = saturate(0.6667f * vh - refFactor);
+
+	// Thin-layer Beer-Lambert optical transmission through clearcoat
+	float thinDistance = (rcp(nv_bottom) + rcp(nl_bottom));
+	float3 transmission = exp(-0.06f * max(thinDistance - 2.0f, 0.0f));
+
+	// Light that penetrates the clearcoat is attenuated by (1 - Fc)^2 on entry and exit
 	float attenuation = 1.0f - clearCoatFresnel;
 	albedoScaling = attenuation * attenuation;
 	
-	float3 specBase = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+	float3 specBase = SpecularBRDF_GGX(nh, nl_bottom, vh_bottom, nv_bottom, roughness, material.specular, normalizeFactor);
 	
-	// Base specular is attenuated both on the way in and out. Clearcoat specular is added on top.
-	return (specBase * albedoScaling) + clearCoatSpecular;
+	// Base specular is attenuated and absorbed. Clearcoat specular is added on top.
+	return (specBase * albedoScaling * transmission) + clearCoatSpecular;
 }
 
 /**
- * Translucency add dispatch: SKIN and SUBSURFACE both receive the material's
- * authored transmittance response. No screen-space probes - light bleed is
- * shaped purely by the ndotl-based term, so no false-thickness artifacts can
- * be sourced from the G-buffer at all. `coord` keeps call-site signatures
- * intact and is unused. `ao` / `shadow` feed BackScatter and the transmission
- * blend.
+ * [Steve McAuley 2011, "Energy-conserving wrapped diffuse"]
+ * Two-sided wrapped transmission for thin geometry (foliage, leaves, paper, cloth).
+ */
+float3 SubsurfaceShadingTwoSided(MaterialParam material, float3 N, float3 L, float3 V)
+{
+	float wrapNoL = saturate((-dot(N, L) + 0.5f) / 2.25f);
+	float voL = dot(V, L);
+	float m2 = 0.36f; // roughness ~0.6
+	float nh = saturate(-voL);
+	float d = (nh * m2 - nh) * nh + 1.0f;
+	float scatter = m2 / (PI * d * d);
+
+	float3 transColor = any(material.customDataB > 1e-4f) ? material.customDataB : material.albedo;
+	return transColor * (wrapNoL * scatter * saturate(material.customDataA));
+}
+
+/**
+ * Analytical Eye Iris Caustic (Jimenez 2014 / Eye BxDF).
+ * Evaluates focused illumination on the iris opposite the incident light.
+ *
+ * @param irisNormal    Normal of the iris / pupil plane.
+ * @param causticNormal Concave-curved normal focusing light across the iris.
+ * @param L             Incident light direction.
+ * @return float        Caustic irradiance multiplier.
+ */
+float EyeIrisCaustic(float3 irisNormal, float3 causticNormal, float3 L)
+{
+	float irisNoL = saturate(dot(irisNormal, L));
+	float power = lerp(12.0f, 1.0f, irisNoL);
+	return 0.8f + 0.2f * (power + 1.0f) * pow(saturate(dot(causticNormal, L)), power);
+}
+
+/**
+ * Translucency add dispatch:
+ * SKIN receives the multilayer dermal/epidermal response + backlit glow.
+ * SUBSURFACE receives Steve McAuley two-sided wrapped transmission (foliage/leaves/cloth/paper).
  */
 float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0), float ao = 1.0f, float shadow = 1.0f)
 {
 	[branch]
-	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+	if (material.lightModel == SHADINGMODELID_SKIN)
 		return SubsurfaceShadingCheatSkin(material, N, L, V, ao, shadow) + SubsurfaceShadingBacklitGlow(material, N, L, V);
+	else if (material.lightModel == SHADINGMODELID_SUBSURFACE)
+		return SubsurfaceShadingTwoSided(material, N, L, V);
 	else
 		return 0;
 }
@@ -894,6 +982,7 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float occlusion = ComputeAmbientMicroOcclusion(saturate(nl), material.visibility) * shadow;
 
 	float diffuseOcclusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : occlusion;
+	bool isHair = (material.lightModel == SHADINGMODELID_ANISOTROPY) && any(material.customDataB.gb > 0.001f);
 
 #if TOON_ENABLE
 	float3 diffuse = 0;
@@ -913,12 +1002,17 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	}
 	else
 	{
-		// UE SubsurfaceBxDF toolchain: standard diffuse here, the SSS/transmission
-		// terms are added by SubsurfaceShading
-		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+		if (isHair)
+			diffuse = KajiyaKayDiffuseAttenuation(material.albedo, L, V, N, shadow) * diffuseOcclusion;
+		else
+			diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 	}
 #else
-	float3 diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+	float3 diffuse = 0;
+	if (isHair)
+		diffuse = KajiyaKayDiffuseAttenuation(material.albedo, L, V, N, shadow) * diffuseOcclusion;
+	else
+		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 #endif
 
 	float3 specular = 0;
@@ -979,7 +1073,8 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001);
 	roughness = FilterGeometricRoughness(roughness, N);
-	float diffuse = DiffuseBRDF(N, Ld, V, roughness);
+	bool isHair = (material.lightModel == SHADINGMODELID_ANISOTROPY) && any(material.customDataB.gb > 0.001f);
+	float diffuse = isHair ? dot(KajiyaKayDiffuseAttenuation(material.albedo, Ld, V, N, 1.0f), 0.33333f) : DiffuseBRDF(N, Ld, V, roughness);
 	float shadow = ComputeAmbientMicroOcclusion(nl2, material.visibility);
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	float skinShadow = isSkin ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow;
