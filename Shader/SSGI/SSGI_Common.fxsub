@@ -22,9 +22,9 @@
 #	define SSGI_STEPS 14
 #	define SSGI_RADIUS 16
 #elif GI_QUALITY == 4
-#	define SSGI_RAY_COUNT 20
-#	define SSGI_STEPS 16
-#	define SSGI_RADIUS 18
+#	define SSGI_RAY_COUNT 16
+#	define SSGI_STEPS 14
+#	define SSGI_RADIUS 16
 #else
 #	define SSGI_RAY_COUNT 8
 #	define SSGI_STEPS 12
@@ -90,23 +90,6 @@ inline float Halton2(int index)
 	return result;
 }
 
-/**
- * Low-discrepancy radical inverse base 3 in SM 3.0 float ALU.
- */
-inline float Halton3(int index)
-{
-	float result = 0.0f;
-	float f = 1.0f / 3.0f;
-	[unroll]
-	for (int i = 0; i < 4; ++i)
-	{
-		if (index <= 0) break;
-		result += float(index % 3) * f;
-		index /= 3;
-		f *= (1.0f / 3.0f);
-	}
-	return result;
-}
 
 /**
  * Analytical branchless scaling factor to clip a 2D ray step exactly to viewport margins.

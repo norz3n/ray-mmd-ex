@@ -175,15 +175,14 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
 							bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
 
-							// Emitter normal & backface check: reject geometry facing away from the ray
-							float3 nSample = GetSSGINormal(currentUv);
-							float NsDotMinusL = dot(nSample, -lightVector);
-							if (NsDotMinusL > 0.0f || isEmissive)
+							// Adaptive Depth Thickness Gating: early test avoids unnecessary normal texture fetch
+							float thickWeight = ComputeThicknessWeight(zDiff, pOrigin.z, dist, stepLength, isEmissive);
+							if (thickWeight > 0.0f)
 							{
-								// Adaptive Depth Thickness Gating: prevents light leak through thin walls, fingers, hair, or behind emitters
-								float thickWeight = ComputeThicknessWeight(zDiff, pOrigin.z, dist, stepLength, isEmissive);
-
-								if (thickWeight > 0.0f)
+								// Emitter normal & backface check: reject geometry facing away from the ray
+								float3 nSample = GetSSGINormal(currentUv);
+								float NsDotMinusL = dot(nSample, -lightVector);
+								if (NsDotMinusL > 0.0f || isEmissive)
 								{
 									float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.7f + 0.3f) : saturate(NsDotMinusL);
 									float geomFactor = saturate(NdotL) * emitterCosine;
