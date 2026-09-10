@@ -128,4 +128,7 @@ const float2 customBMapLoopNum = 2.0;
 #define PROCEDURAL_HAIR_INTENSITY 0.45
 #define PROCEDURAL_HAIR_SCALE 0.45
 
+#define HASHED_ALPHA_TEST_ENABLE 1
+#define HASHED_ALPHA_SCALE 1.0f
+
 #include "../../material_common_2.0.fxsub"
