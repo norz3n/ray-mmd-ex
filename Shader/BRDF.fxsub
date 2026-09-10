@@ -508,15 +508,15 @@ float3 EnvBRDFApprox(float3 specularColor, float roughness, float NoV)
 /**
  * Analytical energy transfer for ultra-rough microfacets (roughness > 0.95).
  * As microfacets reach extreme roughness, specular scattering degenerates into
- * diffuse-like hemispherically scattered light. Transfers the specular directional
- * albedo integral (0.45 * SpecularColor) into the diffuse response and damps specular
- * to eliminate microfacet highlights and shimmering on matte materials.
+ * diffuse-like hemispherically scattered light. Returns the directional albedo
+ * transfer factor (0.45 * factor) to add into diffuse and damps specular to
+ * eliminate microfacet highlights and shimmering on matte materials.
  */
-void EnergyPreservingFullyRough(inout float3 diffuse, inout float3 specular, float3 specColor, float roughness)
+float EnergyPreservingFullyRough(inout float3 specular, float roughness)
 {
 	float fullyRoughFactor = saturate((roughness - 0.95f) * 20.0f);
-	diffuse += specColor * (0.45f * fullyRoughFactor);
 	specular *= (1.0f - fullyRoughFactor);
+	return 0.45f * fullyRoughFactor;
 }
 
 // Angular radius of the "sphere light" used by SphereMaxNoH for highlight
@@ -938,7 +938,7 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	else
 	{
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
-		EnergyPreservingFullyRough(diffuse, specular, material.specular, roughness);
+		diffuse += material.specular * EnergyPreservingFullyRough(specular, roughness);
 	}
 
 #if TOON_ENABLE
@@ -1001,7 +1001,7 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	else
 	{
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
-		EnergyPreservingFullyRough(diffuse, specular, material.specular, roughness);
+		diffuse += dot(material.specular, 0.33333f) * EnergyPreservingFullyRough(specular, roughness);
 	}
 
 	return float4(diffuse * albedoScaling, specular) * nl2 * skinShadow;
