@@ -652,16 +652,45 @@ float3 ColorSynthesis(float3 diffuse, float3 m)
 #define HASHED_ALPHA_SCALE 1.0f
 #endif
 
+#ifndef HASHED_ALPHA_BAND
+#define HASHED_ALPHA_BAND 0.12f
+#endif
+
+// Dave Hoskins - Hash without Sine (immune to precision loss on DX9 SM3.0)
+float Hash31(float3 p)
+{
+	p = frac(p * 0.1031f);
+	p += dot(p, p.yzx + 33.33f);
+	return frac((p.x + p.y) * p.z);
+}
+
 // Wyman & McGuire (I3D 2017): Hashed Alpha Testing
 float HashedAlphaThreshold(float3 pos, float scale)
 {
 	float3 p = pos * scale;
 	float maxDeriv = max(length(ddx(p)), length(ddy(p)));
-	float pixScale = 1.0f / (maxDeriv + 1e-5f);
+	float pixScale = exp2(-floor(log2(maxDeriv + 1e-5f)));
 	float3 cell = floor(p * pixScale);
-	float h = frac(sin(dot(cell, float3(127.1f, 311.7f, 74.7f))) * 43758.5453f);
+	float h = Hash31(cell);
 	return clamp(h, 0.001f, 0.999f);
 }
+
+// Band-limited stochastic alpha test:
+// Preserves solid hair interior (100% opaque, 0% noise/holes)
+// Preserves transparent background (100% clipped, 0% stray specks)
+// Confines stochastic dither strictly to the subpixel silhouette edge [threshold - band, threshold + band]
+float HashedAlphaClip(float alpha, float3 pos, float scale, float alphaThreshold)
+{
+	[flatten] if (alpha >= alphaThreshold + HASHED_ALPHA_BAND)
+		return 1.0f;
+	[flatten] if (alpha <= alphaThreshold - HASHED_ALPHA_BAND)
+		return -1.0f;
+
+	float t = saturate((alpha - (alphaThreshold - HASHED_ALPHA_BAND)) / (2.0f * HASHED_ALPHA_BAND));
+	float h = HashedAlphaThreshold(pos, scale);
+	return t - h;
+}
+
 
 float3 HexHeightBlendWeights(float3 weights, float3 heights, float contrast = 0.2f)
 {
@@ -2144,8 +2173,7 @@ GbufferParam MaterialPS(
 	// ponytail: perform early alpha clip before expensive POM raymarching
 	float alpha = GetAlpha(coord0);
 #if HASHED_ALPHA_TEST_ENABLE
-	float hashedThreshold = HashedAlphaThreshold(worldPos.xyz, HASHED_ALPHA_SCALE);
-	clip(alpha - hashedThreshold);
+	clip(HashedAlphaClip(alpha, worldPos.xyz, HASHED_ALPHA_SCALE, ALPHA_THRESHOLD));
 #else
 	clip(alpha - ALPHA_THRESHOLD);
 #endif
@@ -2230,8 +2258,7 @@ GbufferParam Material2PS(
 	// ponytail: perform early alpha clip before expensive POM raymarching
 	float alpha = GetAlpha(coord0);
 #if HASHED_ALPHA_TEST_ENABLE
-	float hashedThreshold2 = HashedAlphaThreshold(worldPos.xyz, HASHED_ALPHA_SCALE);
-	clip(alpha - hashedThreshold2);
+	clip(HashedAlphaClip(alpha, worldPos.xyz, HASHED_ALPHA_SCALE, ALPHA_THRESHOLD));
 #else
 	clip(alpha - 0.01);
 #endif
@@ -2301,7 +2328,7 @@ GbufferParam Material2PS(
 #endif
 	material.lightModel = GetLightMode(material);
 #if HASHED_ALPHA_TEST_ENABLE
-	material.alpha = alpha > hashedThreshold2 ? 0 : alpha;
+	material.alpha = 0;
 #elif ALPHA_MAP_FROM == 2
 	material.alpha = alpha;
 #else
@@ -2350,7 +2377,7 @@ void UVSSSIrradiancePS(
 {
 	float alpha = GetAlpha(meshUV);
 #if HASHED_ALPHA_TEST_ENABLE
-	clip(alpha - HashedAlphaThreshold(worldPos, HASHED_ALPHA_SCALE));
+	clip(HashedAlphaClip(alpha, worldPos, HASHED_ALPHA_SCALE, ALPHA_THRESHOLD));
 #else
 	clip(alpha - ALPHA_THRESHOLD);
 #endif
