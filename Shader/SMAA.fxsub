@@ -25,18 +25,38 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-#if AA_QUALITY == 2 || AA_QUALITY == 4
-	#define SMAA_THRESHOLD 0.1
-	#define SMAA_MAX_SEARCH_STEPS 16
-	#define SMAA_MAX_SEARCH_STEPS_DIAG 0
-	#define SMAA_CORNER_ROUNDING 0
-	#define SMAA_CORNER_ROUNDING_NORM (float(SMAA_CORNER_ROUNDING) / 100.0)
-#else
+#if AA_QUALITY == 2
 	#define SMAA_THRESHOLD 0.1
 	#define SMAA_MAX_SEARCH_STEPS 16
 	#define SMAA_MAX_SEARCH_STEPS_DIAG 8
 	#define SMAA_CORNER_ROUNDING 25
 	#define SMAA_CORNER_ROUNDING_NORM (float(SMAA_CORNER_ROUNDING) / 100.0)
+	#define SMAA_SUBPIXEL_RECONSTRUCTION 1
+	#define SMAA_SUBPIXEL_WEIGHT 0.25f
+#elif AA_QUALITY == 3
+	#define SMAA_THRESHOLD 0.075
+	#define SMAA_MAX_SEARCH_STEPS 24
+	#define SMAA_MAX_SEARCH_STEPS_DIAG 12
+	#define SMAA_CORNER_ROUNDING 25
+	#define SMAA_CORNER_ROUNDING_NORM (float(SMAA_CORNER_ROUNDING) / 100.0)
+	#define SMAA_SUBPIXEL_RECONSTRUCTION 1
+	#define SMAA_SUBPIXEL_WEIGHT 0.35f
+#elif AA_QUALITY == 4
+	#define SMAA_THRESHOLD 0.05
+	#define SMAA_MAX_SEARCH_STEPS 32
+	#define SMAA_MAX_SEARCH_STEPS_DIAG 16
+	#define SMAA_CORNER_ROUNDING 25
+	#define SMAA_CORNER_ROUNDING_NORM (float(SMAA_CORNER_ROUNDING) / 100.0)
+	#define SMAA_SUBPIXEL_RECONSTRUCTION 1
+	#define SMAA_SUBPIXEL_WEIGHT 0.50f
+#else
+	#define SMAA_THRESHOLD 0.04
+	#define SMAA_MAX_SEARCH_STEPS 32
+	#define SMAA_MAX_SEARCH_STEPS_DIAG 16
+	#define SMAA_CORNER_ROUNDING 25
+	#define SMAA_CORNER_ROUNDING_NORM (float(SMAA_CORNER_ROUNDING) / 100.0)
+	#define SMAA_SUBPIXEL_RECONSTRUCTION 1
+	#define SMAA_SUBPIXEL_WEIGHT 0.65f
 #endif
 
 #define SMAA_AREATEX_MAX_DISTANCE 16
@@ -353,6 +373,58 @@ float4 SMAAEdgeDetectionVS(
 	return Position;
 }
 
+float4 SMAAColorEdgeDetectionPS(
+	in float4 coord0 : TEXCOORD0,
+	in float4 coord1 : TEXCOORD1,
+	in float4 coord2 : TEXCOORD2,
+	in float4 coord3 : TEXCOORD3,
+	uniform sampler source) : COLOR
+{
+	float4 offset[3] = { coord1, coord2, coord3 };
+	float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
+
+	float3 Ccenter   = tex2Dlod(source, float4(coord0.xy, 0, 0)).rgb;
+	float3 Cleft     = tex2Dlod(source, float4(offset[0].xy, 0, 0)).rgb;
+	float3 Ctop      = tex2Dlod(source, float4(offset[0].zw, 0, 0)).rgb;
+	float3 Cright    = tex2Dlod(source, float4(offset[1].xy, 0, 0)).rgb;
+	float3 Cbottom   = tex2Dlod(source, float4(offset[1].zw, 0, 0)).rgb;
+	float3 Cleftleft = tex2Dlod(source, float4(offset[2].xy, 0, 0)).rgb;
+	float3 Ctoptop   = tex2Dlod(source, float4(offset[2].zw, 0, 0)).rgb;
+
+#if AA_QUALITY == 5
+	// Predicated geometric silhouette edge sensitivity from GBuffer linear depth:
+	float zCenter = tex2Dlod(Gbuffer8Map, float4(coord0.xy, 0, 0)).r;
+	float zLeft   = tex2Dlod(Gbuffer8Map, float4(offset[0].xy, 0, 0)).r;
+	float zTop    = tex2Dlod(Gbuffer8Map, float4(offset[0].zw, 0, 0)).r;
+	float2 zDelta = abs(zCenter - float2(zLeft, zTop)) / max(zCenter, 1e-2f);
+	threshold *= lerp(1.0f, 0.35f, saturate(zDelta * 25.0f));
+#endif
+
+	float4 delta;
+	float3 tL = abs(Ccenter - Cleft);
+	float3 tT = abs(Ccenter - Ctop);
+	delta.x = max(max(tL.r, tL.g), tL.b);
+	delta.y = max(max(tT.r, tT.g), tT.b);
+
+	float2 edges = step(threshold, delta.xy);
+	clip(sum(edges) - EPSILON);
+
+	float3 tR = abs(Ccenter - Cright);
+	float3 tB = abs(Ccenter - Cbottom);
+	delta.z = max(max(tR.r, tR.g), tR.b);
+	delta.w = max(max(tB.r, tB.g), tB.b);
+
+	float2 maxDelta = max(delta.xy, delta.zw);
+	maxDelta = max(maxDelta.xx, maxDelta.yy);
+
+	float3 tLL = abs(Cleft - Cleftleft);
+	float3 tTT = abs(Ctop - Ctoptop);
+	float2 deltaLLTT = float2(max(max(tLL.r, tLL.g), tLL.b), max(max(tTT.r, tTT.g), tTT.b));
+	maxDelta = max(maxDelta.xy, deltaLLTT);
+
+	return float4(edges * step(maxDelta * 0.5f, delta.xy), 0.0f, 0.0f);
+}
+
 float4 SMAALumaEdgeDetectionPS(
 	in float4 coord0 : TEXCOORD0,
 	in float4 coord1 : TEXCOORD1,
@@ -491,29 +563,101 @@ float4 SMAANeighborhoodBlendingPS(
 	uniform bool final) : COLOR
 {
 	float4 a;
-	a.x = tex2Dlod(SMAABlendMapSamp, float4(coord1.xy, 0, 0)).a;
-	a.y = tex2Dlod(SMAABlendMapSamp, float4(coord1.zw, 0, 0)).g;
-	a.wz = tex2Dlod(SMAABlendMapSamp, float4(coord0, 0, 0)).xz;
+	a.x = tex2Dlod(SMAABlendMapSamp, float4(coord1.xy, 0, 0)).a; // Right
+	a.y = tex2Dlod(SMAABlendMapSamp, float4(coord1.zw, 0, 0)).g; // Top
+	a.wz = tex2Dlod(SMAABlendMapSamp, float4(coord0, 0, 0)).xz;   // Bottom / Left
+
+	float weightH = a.x + a.z;
+	float weightV = a.y + a.w;
+	float totalWeight = weightH + weightV;
+
+	float4 colorCenter = tex2Dlod(source, float4(coord0, 0, 0));
 
 	[branch]
-	if (sum(a) < EPSILON) 
+	if (totalWeight < EPSILON) 
 	{
-		float4 color = tex2Dlod(source, float4(coord0, 0, 0));
-		return float4(color.rgb, final ? 1 : luminance(color.rgb));
+#if SMAA_SUBPIXEL_RECONSTRUCTION
+		// Subpixel Reconstruction: smooths isolated 1-pixel micro-features (eyelashes, hair tips, thin lines)
+		float4 colorL = tex2Dlod(source, float4(coord0 - float2(ViewportOffset2.x, 0.0), 0, 0));
+		float4 colorR = tex2Dlod(source, float4(coord0 + float2(ViewportOffset2.x, 0.0), 0, 0));
+		float4 colorT = tex2Dlod(source, float4(coord0 - float2(0.0, ViewportOffset2.y), 0, 0));
+		float4 colorB = tex2Dlod(source, float4(coord0 + float2(0.0, ViewportOffset2.y), 0, 0));
+
+		float lumaC = colorCenter.a;
+		float lumaL = colorL.a;
+		float lumaR = colorR.a;
+		float lumaT = colorT.a;
+		float lumaB = colorB.a;
+
+		float rangeMax = max(max(max(lumaL, lumaR), max(lumaT, lumaB)), lumaC);
+		float rangeMin = min(min(min(lumaL, lumaR), min(lumaT, lumaB)), lumaC);
+		float range = rangeMax - rangeMin;
+
+		[branch]
+		if (range > SMAA_THRESHOLD)
+		{
+			float3 crossAvg = (colorL.rgb + colorR.rgb + colorT.rgb + colorB.rgb) * 0.25f;
+			float subpix = abs(dot(float4(lumaL, lumaR, lumaT, lumaB), 0.25f) - lumaC) / max(range, 1e-4f);
+			subpix = smoothstep(0.0f, 1.0f, subpix) * SMAA_SUBPIXEL_WEIGHT;
+			colorCenter.rgb = lerp(colorCenter.rgb, crossAvg, subpix);
+		}
+#endif
+		return float4(colorCenter.rgb, final ? 1 : luminance(colorCenter.rgb));
 	}
 	else 
 	{
-		bool h = max(a.x, a.z) > max(a.y, a.w);
+		// Dual-Axis Bilinear Blending: resolves diagonal & curved edges without single-axis quantization
+		float4 colorH = colorCenter;
+		[flatten]
+		if (weightH > EPSILON)
+		{
+			float2 blendingWeightH = a.xz / weightH;
+			float4 blendingOffsetH = float4(a.x, 0.0, a.z, 0.0);
+			colorH = blendingWeightH.x * tex2Dlod(source, float4(coord0 + ViewportOffset2 * blendingOffsetH.xy, 0, 0)) +
+			         blendingWeightH.y * tex2Dlod(source, float4(coord0 - ViewportOffset2 * blendingOffsetH.zw, 0, 0));
+		}
 
-		float4 blendingOffset = float4(0.0, a.y, 0.0, a.w);
-		float2 blendingWeight = a.yw;
-		SMAAMovc(bool4(h, h, h, h), blendingOffset, float4(a.x, 0.0, a.z, 0.0));
-		SMAAMovc(bool2(h, h), blendingWeight, a.xz);
-		blendingWeight /= sum(blendingWeight);
+		float4 colorV = colorCenter;
+		[flatten]
+		if (weightV > EPSILON)
+		{
+			float2 blendingWeightV = a.yw / weightV;
+			float4 blendingOffsetV = float4(0.0, a.y, 0.0, a.w);
+			colorV = blendingWeightV.x * tex2Dlod(source, float4(coord0 + ViewportOffset2 * blendingOffsetV.xy, 0, 0)) +
+			         blendingWeightV.y * tex2Dlod(source, float4(coord0 - ViewportOffset2 * blendingOffsetV.zw, 0, 0));
+		}
 
-		float4 color = 0;
-		color += blendingWeight.x * tex2Dlod(source, float4(coord0 + ViewportOffset2 * blendingOffset.xy, 0, 0));
-		color += blendingWeight.y * tex2Dlod(source, float4(coord0 - ViewportOffset2 * blendingOffset.zw, 0, 0));
+		float blendFactor = weightH / totalWeight;
+		float4 color = lerp(colorV, colorH, blendFactor);
+
+#if SMAA_SUBPIXEL_RECONSTRUCTION
+		// Subpixel touch-up on transitional morphological edges (tapered hair tips)
+		if (totalWeight < 0.35f)
+		{
+			float4 colorL = tex2Dlod(source, float4(coord0 - float2(ViewportOffset2.x, 0.0), 0, 0));
+			float4 colorR = tex2Dlod(source, float4(coord0 + float2(ViewportOffset2.x, 0.0), 0, 0));
+			float4 colorT = tex2Dlod(source, float4(coord0 - float2(0.0, ViewportOffset2.y), 0, 0));
+			float4 colorB = tex2Dlod(source, float4(coord0 + float2(0.0, ViewportOffset2.y), 0, 0));
+
+			float lumaC = colorCenter.a;
+			float lumaL = colorL.a;
+			float lumaR = colorR.a;
+			float lumaT = colorT.a;
+			float lumaB = colorB.a;
+
+			float rangeMax = max(max(max(lumaL, lumaR), max(lumaT, lumaB)), lumaC);
+			float rangeMin = min(min(min(lumaL, lumaR), min(lumaT, lumaB)), lumaC);
+			float range = rangeMax - rangeMin;
+
+			if (range > SMAA_THRESHOLD)
+			{
+				float3 crossAvg = (colorL.rgb + colorR.rgb + colorT.rgb + colorB.rgb) * 0.25f;
+				float subpix = abs(dot(float4(lumaL, lumaR, lumaT, lumaB), 0.25f) - lumaC) / max(range, 1e-4f);
+				subpix = smoothstep(0.0f, 1.0f, subpix) * SMAA_SUBPIXEL_WEIGHT * (1.0f - totalWeight / 0.35f);
+				color.rgb = lerp(color.rgb, crossAvg, subpix);
+			}
+		}
+#endif
 
 		return float4(color.rgb, final ? 1 : luminance(color.rgb));
 	}

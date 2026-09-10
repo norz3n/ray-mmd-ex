@@ -757,27 +757,13 @@ technique DeferredLighting<
 #endif
 #endif
 
-#if AA_QUALITY == 2 || AA_QUALITY == 3
+#if AA_QUALITY >= 2 && AA_QUALITY <= 5
 	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection;"
 	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation;"
 #if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlending;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlending;"
-#endif
-#endif
-
-#if AA_QUALITY == 4 || AA_QUALITY == 5
-	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection1x;"
-	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation1x;"
-	"RenderColorTarget=ShadingMap; Pass=SMAANeighborhoodBlending;"
-
-	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection2x;"
-	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation2x;"
-#if POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlendingFinal;"
-#else
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlendingFinal;"
 #endif
 #endif
 
@@ -1475,12 +1461,12 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 FXAA3(ShadingMapTempSamp, ViewportOffset2);
 	}
 #endif
-#if AA_QUALITY == 2 || AA_QUALITY == 3
+#if AA_QUALITY >= 2 && AA_QUALITY <= 5
 	pass SMAAEdgeDetection<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 SMAAEdgeDetectionVS();
-		PixelShader  = compile ps_3_0 SMAALumaEdgeDetectionPS(ShadingMapTempSamp);
+		PixelShader  = compile ps_3_0 SMAAColorEdgeDetectionPS(ShadingMapTempPointSamp);
 	}
 	pass SMAABlendingWeightCalculation<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
@@ -1493,44 +1479,6 @@ technique DeferredLighting<
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 SMAANeighborhoodBlendingVS();
 		PixelShader  = compile ps_3_0 SMAANeighborhoodBlendingPS(ShadingMapTempSamp, true);
-	}
-#endif
-#if AA_QUALITY == 4 || AA_QUALITY == 5
-	pass SMAAEdgeDetection1x<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 SMAAEdgeDetectionVS();
-		PixelShader  = compile ps_3_0 SMAALumaEdgeDetectionPS(ShadingMapTempSamp);
-	}
-	pass SMAABlendingWeightCalculation1x<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 SMAABlendingWeightCalculationVS();
-		PixelShader  = compile ps_3_0 SMAABlendingWeightCalculationPS(float4(1, 1, 1, 0));
-	}
-	pass SMAANeighborhoodBlending<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 SMAANeighborhoodBlendingVS();
-		PixelShader  = compile ps_3_0 SMAANeighborhoodBlendingPS(ShadingMapTempSamp, false);
-	}
-	pass SMAAEdgeDetection2x<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 SMAAEdgeDetectionVS();
-		PixelShader  = compile ps_3_0 SMAALumaEdgeDetectionPS(ShadingMapSamp);
-	}
-	pass SMAABlendingWeightCalculation2x<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 SMAABlendingWeightCalculationVS();
-		PixelShader  = compile ps_3_0 SMAABlendingWeightCalculationPS(float4(2, 2, 2, 0));
-	}
-	pass SMAANeighborhoodBlendingFinal<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 SMAANeighborhoodBlendingVS();
-		PixelShader  = compile ps_3_0 SMAANeighborhoodBlendingPS(ShadingMapSamp, true);
 	}
 #endif
 #if AA_QUALITY == 6

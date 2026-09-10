@@ -30,7 +30,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // ==============================================================================
-#if 0
+#if 1
 #define FXAA_QUALITY__PS 12
 #define FXAA_QUALITY__P0 1.0
 #define FXAA_QUALITY__P1 1.0
