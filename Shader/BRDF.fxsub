@@ -626,24 +626,6 @@ float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughn
 	return fresnel * spec * energyCompensation;
 }
 
-/**
- * [Kajiya & Kay 1989 / Marschner et al.]
- * Cylindrical volume diffuse attenuation for hair fibers with multiple-scattering wrap
- * and shadow chromatic tinting.
- */
-float3 KajiyaKayDiffuseAttenuation(float3 baseColor, float3 L, float3 V, float3 N, float shadow)
-{
-	float kajiyaDiffuse = 1.0f - abs(dot(N, L));
-
-	float3 fakeNormal = normalize(V - N * dot(V, N));
-	float noL_wrap = saturate((dot(fakeNormal, L) + 1.0f) * 0.25f);
-	float diffuseScatter = (1.0f / PI) * lerp(noL_wrap, kajiyaDiffuse, 0.33f);
-
-	float luma = dot(baseColor, float3(0.299f, 0.587f, 0.114f));
-	float3 scatterTint = pow(max(baseColor / max(luma, 1e-4f), 1e-4f), 1.0f - shadow);
-	return sqrt(baseColor) * diffuseScatter * scatterTint;
-}
-
 float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
 {
 	// World-up tangent frame; fall back to X axis near poles
@@ -662,10 +644,9 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 		T = rotatedT;
 	}
 
-	// [Kulla 2017, "Revisiting Physically Based Shading at Imageworks"]
-	// Linear anisotropic roughness parametrization along tangent and bitangent axes
-	float ax = max(roughness * (1.0f + anisotropic), 0.001f);
-	float ay = max(roughness * (1.0f - anisotropic), 0.001f);
+	float aspect = sqrt(max(1.0f - anisotropic * 0.9f, 0.01f));
+	float ax = max(roughness / aspect, 0.001f);
+	float ay = max(roughness * aspect, 0.001f);
 
 	bool isHair = any(shift.gb > 0.001f);
 
@@ -679,8 +660,8 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 		// Secondary highlight (TRT lobe - transmission bounce shifted towards tip, tinted by hair albedo)
 		float3 H_shift2 = normalize(H - N * (shift.b * 0.15f + 0.08f));
 		float r2 = saturate(roughness * 1.4f + 0.1f);
-		float ax2 = max(r2 * (1.0f + anisotropic), 0.001f);
-		float ay2 = max(r2 * (1.0f - anisotropic), 0.001f);
+		float ax2 = max(r2 / aspect, 0.001f);
+		float ay2 = max(r2 * aspect, 0.001f);
 		float d2 = pow2(dot(T, H_shift2) / ax2) + pow2(dot(B, H_shift2) / ay2) + nh * nh;
 		float spec2 = (1.0f / (ax2 * ay2 * max(d2 * d2, 1e-6f))) * NormalizationFactor;
 
@@ -982,7 +963,6 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float occlusion = ComputeAmbientMicroOcclusion(saturate(nl), material.visibility) * shadow;
 
 	float diffuseOcclusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : occlusion;
-	bool isHair = (material.lightModel == SHADINGMODELID_ANISOTROPY) && any(material.customDataB.gb > 0.001f);
 
 #if TOON_ENABLE
 	float3 diffuse = 0;
@@ -1002,17 +982,10 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	}
 	else
 	{
-		if (isHair)
-			diffuse = KajiyaKayDiffuseAttenuation(material.albedo, L, V, N, shadow) * diffuseOcclusion;
-		else
-			diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 	}
 #else
-	float3 diffuse = 0;
-	if (isHair)
-		diffuse = KajiyaKayDiffuseAttenuation(material.albedo, L, V, N, shadow) * diffuseOcclusion;
-	else
-		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+	float3 diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 #endif
 
 	float3 specular = 0;
@@ -1073,8 +1046,7 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001);
 	roughness = FilterGeometricRoughness(roughness, N);
-	bool isHair = (material.lightModel == SHADINGMODELID_ANISOTROPY) && any(material.customDataB.gb > 0.001f);
-	float diffuse = isHair ? dot(KajiyaKayDiffuseAttenuation(material.albedo, Ld, V, N, 1.0f), 0.33333f) : DiffuseBRDF(N, Ld, V, roughness);
+	float diffuse = DiffuseBRDF(N, Ld, V, roughness);
 	float shadow = ComputeAmbientMicroOcclusion(nl2, material.visibility);
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	float skinShadow = isSkin ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow;

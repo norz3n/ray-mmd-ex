@@ -228,9 +228,7 @@ All BRDF/dispatch kernels actually implemented in the material shading unit, wit
 | Multi-scattering specular energy compensation | V. Turquin 2018 (private notes) / M. Fdez-Aguera 2019, "A Multiple-Scattering Microfacet Model for Real-Time Image Based Lighting" |
 | Blinn-Phong specular `SpecularBRDF_Blinn` (glass) | J. Blinn 1977 |
 | Dual-lobe skin specular `DualLobeSkinSpecular` (widths/mix authorable via `SKIN_SPEC_LOBE*`) | dual-specular-lobe skin profile model (two-GGX mix), cf. J. Jimenez et al. 2015 "SEPARABLE SSS" and B. Penner 2011 (GPU Pro 2), with single-pass D-blend and unified Smith joint visibility |
-| Anisotropic GGX `SpecularBRDF_GGXAniso` (incl. shifted R/TRBT hair lobes) | Burley 2012; Kulla 2017 "Revisiting Physically Based Shading at Imageworks"; Heitz aniso Smith `Vis_SmithJointAniso` |
-| Linear anisotropic roughness parametrization ($a_x, a_y$) | A. Kulla 2017, "Revisiting Physically Based Shading at Imageworks" ($a_x = \alpha(1+a), a_y = \alpha(1-a)$) |
-| Kajiya-Kay cylindrical hair diffuse `KajiyaKayDiffuseAttenuation` | J. Kajiya & T. Kay 1989, "Rendering Fur with Three Dimensional Textures"; multiple-scattering wrap and chromatic shadow tinting per S. Marschner et al. 2003 |
+| Anisotropic GGX `SpecularBRDF_GGXAniso` (incl. shifted R/TRBT hair lobes) | Burley 2012 (energy-preserving aspect ratio parameterization); Heitz aniso Smith `Vis_SmithJointAniso` |
 | Two-sided wrapped transmission `SubsurfaceShadingTwoSided` (foliage, leaves, cloth, paper) | S. McAuley 2011, "Energy-conserving wrapped diffuse" |
 | Analytical Eye Iris Caustic `EyeIrisCaustic` | J. Jimenez 2014, "Next Generation Post Processing in Call of Duty: Advanced Warfare" (focused concave iris caustic highlight) |
 | Sphere-light specular softening `SphereMaxNoH` (opt-in `SPEC_LIGHT_SIN_ALPHA`) | G. de Carpentier 2017, "Decima Engine: Advances in Lighting and AA" (largest-NoH over sphere solid angle + Newton iteration) |
