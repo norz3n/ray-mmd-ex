@@ -1,0 +1,23 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Path Tracing (SSPT / RTGI) Master Include
+ *
+ * Module: SSPT_Main.fxsub
+ * Independent Screen-Space Path Tracing Global Illumination Pipeline.
+ * Integrates qUINT RTGI raymarching, À-Trous cross-bilateral wavelet denoiser, and PBR resolve.
+ */
+
+#ifndef RAY_MMD_SSPT_MAIN_FXSUB
+#define RAY_MMD_SSPT_MAIN_FXSUB
+
+#include "shader/SSPT/SSPT_Common.fxsub"
+#include "shader/SSPT/SSPT_Trace.fxsub"
+#include "shader/SSPT/SSPT_Filter.fxsub"
+#include "shader/SSPT/SSPT_Resolve.fxsub"
+
+// Export standard pass bindings for ray.fx technique pipeline
+#define SSGIPassPS SSPTPassPS
+#define SSGIOutlierRejectPS SSPTOutlierRejectPS
+#define SSGIBlurPS SSPTBlurPS
+#define SSGIFinalCombinePS SSPTFinalCombinePS
+
+#endif // RAY_MMD_SSPT_MAIN_FXSUB

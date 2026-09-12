@@ -1,0 +1,97 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Path Tracing (SSPT / RTGI) Resolve & Composite
+ *
+ * Module: SSPT_Resolve.fxsub
+ * Independent PBR Diffuse Multi-Bounce Composite & Material Response Pass based on qUINT RTGI.
+ * Composites path-traced irradiance, ambient occlusion, material BRDFs, and energy-conserving bounces.
+ */
+
+#ifndef RAY_MMD_SSPT_RESOLVE_FXSUB
+#define RAY_MMD_SSPT_RESOLVE_FXSUB
+
+#include "shader/SSPT/SSPT_Common.fxsub"
+
+/**
+ * Composites denoised indirect path-traced GI with material albedo, BRDF shading models, and occlusion.
+ */
+float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+{
+	float zCenter = GetSSPTLinearDepth(uvCoord);
+	MaterialParam mat;
+	DecodeGbuffer(
+		tex2Dlod(Gbuffer5Map, float4(uvCoord, 0.0f, 0.0f)),
+		tex2Dlod(Gbuffer6Map, float4(uvCoord, 0.0f, 0.0f)),
+		tex2Dlod(Gbuffer7Map, float4(uvCoord, 0.0f, 0.0f)),
+		tex2Dlod(Gbuffer8Map, float4(uvCoord, 0.0f, 0.0f)),
+		mat);
+
+	float3 rawGi = tex2Dlod(SSGIMapSampTemp, float4(uvCoord, 0.0f, 0.0f)).rgb;
+	rawGi = clamp(rawGi, 0.0f, 100.0f);
+
+	// Pre-albedo gathered irradiance, reused for indirect specular
+	float3 gatherIrradiance = rawGi;
+
+#if SSDO_QUALITY > 0
+	float rawAO = tex2Dlod(SSDOMapSamp, float4(uvCoord, 0.0f, 0.0f)).w;
+	float occlusion = (mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO;
+	occlusion = occlusion * occlusion;
+#else
+	float occlusion = 1.0f;
+#endif
+
+	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
+	if (isSkin)
+	{
+		occlusion = lerp(1.0f, occlusion, SKIN_AO_STRENGTH);
+	}
+
+	float3 camDir = normalize(viewDir);
+	float NdV = saturate(dot(mat.normal, camDir));
+
+	[branch]
+	if (isSkin)
+	{
+		rawGi = (rawGi / (1.0f + rawGi * 0.05f)) * mat.albedo;
+		rawGi *= 1.0f + SKIN_GI_COMPENSATION * saturate(dot(rawGi, float3(0.299f, 0.587f, 0.114f)));
+	}
+	else if (mat.lightModel == SHADINGMODELID_GLASS)
+	{
+		rawGi *= max(0.02f, mat.albedo) * (1.0f - saturate(pow(1.0f - NdV, 5.0f))) * mat.alpha;
+	}
+	else if (mat.lightModel == SHADINGMODELID_CLOTH)
+	{
+		rawGi *= mat.albedo + mat.customDataB * (pow(1.0f - NdV, 4.0f) * mat.customDataA);
+	}
+	else if (mat.lightModel == SHADINGMODELID_CLEAR_COAT)
+	{
+		rawGi *= mat.albedo * (1.0f - mat.customDataA * (0.04f + 0.96f * pow(1.0f - NdV, 5.0f)));
+	}
+	else
+	{
+		rawGi = (rawGi / (1.0f + rawGi * 0.05f)) * mat.albedo;
+	}
+
+	// Energy-conserving multi-bounce interreflection
+	float3 multiBounce = isSkin ? 0.95f : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
+	rawGi *= multiBounce;
+
+#if SSGI_SPECULAR_GI
+	// Rough specular indirect: Fresnel-weighted slice of gathered irradiance
+	float3 specGi = 0.0f;
+	if (!isSkin && mat.lightModel != SHADINGMODELID_GLASS && mat.lightModel != SHADINGMODELID_EMISSIVE && mat.lightModel != SHADINGMODELID_CLOTH)
+	{
+		float3 F = mat.specular + (1.0f - mat.specular) * pow(1.0f - NdV, 5.0f);
+		float roughWeight = saturate(1.0f - mat.smoothness * 1.25f);
+		specGi = gatherIrradiance * F * (roughWeight * 0.5f);
+	}
+#endif
+
+	float receiverVis = tex2Dlod(SSGIVisibilityMapSamp, float4(uvCoord, 0.0f, 0.0f)).a;
+#if SSGI_SPECULAR_GI
+	return float4(clamp((rawGi + specGi) * mSSGIIntensity * occlusion * receiverVis, 0.0f, 100.0f), 0.0f);
+#else
+	return float4(clamp(rawGi * mSSGIIntensity * occlusion * receiverVis, 0.0f, 100.0f), 0.0f);
+#endif
+}
+
+#endif // RAY_MMD_SSPT_RESOLVE_FXSUB

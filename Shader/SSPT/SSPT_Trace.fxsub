@@ -1,0 +1,212 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Path Tracing (SSPT / RTGI) Raymarch & Radiance Gather
+ *
+ * Module: SSPT_Trace.fxsub
+ * Independent Screen-Space Path Tracing Raymarcher based on qUINT RTGI.
+ * Gathers hemisphere indirect radiance with golden angle spiral sampling,
+ * thickness-gated surface intersection, secondary bounce feedback, and environment fallback.
+ */
+
+#ifndef RAY_MMD_SSPT_TRACE_FXSUB
+#define RAY_MMD_SSPT_TRACE_FXSUB
+
+#include "shader/SSPT/SSPT_Common.fxsub"
+#include "shader/BilateralCommon.fxsub"
+
+#if IBL_QUALITY
+/**
+ * Minimal 2-tap decode of the checkerboard-packed EnvLightMap.
+ */
+float3 SampleSkyRadiance(float2 skyUv)
+{
+	float4 packed = tex2Dlod(EnvLightMapSamp, float4(skyUv, 0.0f, 0.0f));
+	float4 neighbor = tex2Dlod(EnvLightMapSamp, float4(skyUv + float2(ViewportOffset2.x, 0.0f), 0.0f, 0.0f));
+	bool pattern = (frac((skyUv.x * ViewportSize.x + skyUv.y * ViewportSize.y) * 0.5f) < 0.5f);
+	float3 ycbcr = pattern ? float3(packed.rg, neighbor.g) : float3(packed.r, neighbor.g, packed.g);
+	return DecodeYcbcr(ycbcr);
+}
+#endif
+
+/**
+ * Screen-Space Path Tracing (RTGI) Primary Radiance Gather Pixel Shader.
+ */
+float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+{
+	float zOrigin = GetSSPTLinearDepth(uvCoord.xy);
+	if (!(zOrigin > 0.0f && zOrigin < 1000.0f))
+		clip(-1);
+
+	float4 projInfo = GetProjConstant();
+	float3 nOrigin = GetSSPTNormal(uvCoord.xy);
+	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
+
+	// Construct orthonormal tangent space basis matrix around surface normal
+	float3x3 tbn = BuildTangentMatrix(nOrigin);
+
+	// Receiver shading model check
+	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord.xy, 0.0f, 0.0f)).a);
+	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
+
+	// World gather radius and depth thickness scaling
+	float maxWorldDistance = max(mSSGIScale * SSPT_SAMPLE_RADIUS * 2.5f, 4.0f) * clamp(mSSGIConeAngle * 2.0f, 0.5f, 3.0f);
+	float invThickness = 1.0f / max((maxWorldDistance * 0.12f) * SSPT_Z_THICKNESS, 0.04f);
+
+	float2 screenPixel = uvCoord.xy * ViewportSize;
+#if AA_QUALITY == 6
+	int frameCounter = (int)fmod(time * 60.0f, 8.0f);
+#else
+	int frameCounter = 0;
+#endif
+
+	// Spatiotemporal dither initialization (qUINT spiral stratification)
+	float ign = InterleavedGradientNoise(screenPixel, frameCounter);
+	float ditherElev = PseudoRandom(screenPixel);
+	float bayerVal = SSPT_Bayer1D[frameCounter % 8];
+
+	float ipixel = ign * 255.0f;
+	float index = ipixel * 8.0f + bayerVal;
+	float sampleJitter = index / (256.0f * 8.0f);
+
+	float angle = SSPT_GOLDEN_ANGLE * index;
+	float sinA, cosA;
+	sincos(angle, sinA, cosA);
+	float2 sampleDir = float2(sinA, cosA);
+
+	float3 totalRadiance = 0.0f;
+	float totalOcclusion = 0.0f;
+
+	[loop]
+	for (int r = 0; r < SSPT_RAY_COUNT; ++r)
+	{
+		float rayProgress = frac((float(r) + sampleJitter) / float(SSPT_RAY_COUNT));
+
+		// Cosine-weighted hemisphere distribution (Lambertian)
+		float cosTheta = sqrt(lerp(0.01f, 0.98f, rayProgress));
+		float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
+
+		// Tangent space ray direction rotated to view space
+		float3 rayDirLocal = float3(sampleDir * sinTheta, cosTheta);
+		float3 rayDir = normalize(mul(rayDirLocal, tbn));
+
+		// Advance golden angle spiral for next ray
+		sampleDir = mul(sampleDir, SSPT_ROTX);
+
+#if SSPT_ISOMETRIC_SAMPLING
+		float rayDirXY = length(rayDir.xy);
+		float currentRayDist = maxWorldDistance * rsqrt(rayDirXY * rayDirXY + 1e-6f);
+#else
+		float currentRayDist = maxWorldDistance;
+#endif
+
+		// Camera near plane clipping
+		if (rayDir.z < -1e-4f)
+			currentRayDist = min(currentRayDist, -0.95f * zOrigin / rayDir.z);
+
+		float intersected = 0.0f;
+		float3 hitRadiance = 0.0f;
+		bool insideScreen = true;
+		float2 lastUV = uvCoord.xy;
+		float stepJitter = frac(ditherElev + float(r) * 0.61803398875f);
+
+		[loop]
+		for (int s = 1; s <= SSPT_STEPS && insideScreen; ++s)
+		{
+			float sNorm = (float(s) + stepJitter) / float(SSPT_STEPS);
+			// Quadratic step progression for dense near-field contacts and wide reach
+			float lambda = sNorm * sqrt(sNorm);
+			float3 pRay = pOrigin + rayDir * (lambda * currentRayDist);
+
+			float2 rayUV = (pRay.xy / max(pRay.z, 1e-3f) - projInfo.zw) / projInfo.xy;
+
+			if (rayUV.x < 0.002f || rayUV.x > 0.998f || rayUV.y < 0.002f || rayUV.y > 0.998f)
+			{
+				insideScreen = false;
+				break;
+			}
+
+			float4 g8Sample = tex2Dlod(Gbuffer8Map, float4(rayUV, 0.0f, 0.0f));
+			float zSample = g8Sample.r;
+
+			if (zSample > 1e-3f && zSample < 1000.0f)
+			{
+				float3 pSample = GetViewPosition(projInfo, rayUV, zSample);
+				float3 delta = (pSample - pRay) * invThickness;
+
+				// qUINT RTGI thickness collision condition
+				if (delta.z < 0.02f && delta.z > -1.0f)
+				{
+					float distSq = dot(delta, delta);
+					if (distSq < 1.0f)
+					{
+						intersected = saturate(1.0f - distSq);
+
+						int hitModel = (int)floor(g8Sample.a);
+						bool isEmissive = (hitModel == SHADINGMODELID_EMISSIVE);
+						bool isSkinEmitter = (hitModel == SHADINGMODELID_SKIN || hitModel == SHADINGMODELID_SUBSURFACE);
+
+						float3 nHit = GetSSPTNormal(rayUV);
+						float cosEmitter = isEmissive ? 1.0f : saturate(dot(-nHit, rayDir));
+						float cosReceiver = saturate(dot(nOrigin, rayDir));
+
+						if (cosEmitter > 0.01f || isEmissive)
+						{
+							float3 sampleColor = clamp(tex2Dlod(ShadingMapSamp, float4(rayUV, 0.0f, 0.0f)).rgb, 0.0f, 60.0f);
+
+							if (isEmissive)
+							{
+								float emissiveBoost = lerp(1.0f, 3.0f, mDbgSSGIEmissiveBoost);
+								sampleColor *= emissiveBoost;
+							}
+							else if (isSkinEmitter && !receiverIsSkin)
+							{
+								sampleColor *= SKIN_GI_EMISSION_SCALE;
+							}
+
+#if SSPT_BOUNCES
+							// Multi-bounce secondary bounce gather
+							float3 nextBounce = clamp(tex2Dlod(SSGIMapSamp, float4(rayUV, 0.0f, 0.0f)).rgb, 0.0f, 20.0f);
+							sampleColor += nextBounce * SSPT_BOUNCE_WEIGHT;
+#endif
+
+							float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(rayUV, 0.0f, 0.0f)).a;
+							float hitWeight = intersected * cosEmitter * cosReceiver * emitterVis;
+
+							hitRadiance = sampleColor * hitWeight;
+							break;
+						}
+					}
+				}
+			}
+
+			lastUV = rayUV;
+		}
+
+		// Sky / Environment Radiance for escaped rays
+		if (intersected < 0.25f && insideScreen)
+		{
+			float NdotSky = saturate(dot(nOrigin, rayDir));
+#if IBL_QUALITY
+			float3 skyRadiance = SampleSkyRadiance(saturate(lastUV));
+#else
+			float3 skyRadiance = srgb2linear(tex2Dlod(ScnSamp, float4(saturate(lastUV), 0.0f, 0.0f)).rgb);
+#endif
+			float skyWeight = NdotSky * lerp(0.30f, 1.00f, mDbgSSGISkyLight) * (1.0f - intersected);
+			hitRadiance += clamp(skyRadiance, 0.0f, 10.0f) * skyWeight;
+		}
+
+		totalRadiance += hitRadiance;
+		totalOcclusion += intersected;
+	}
+
+	float3 avgRadiance = totalRadiance / float(SSPT_RAY_COUNT);
+	float avgOcclusion = totalOcclusion / float(SSPT_RAY_COUNT);
+
+	float giGain = PI * lerp(lerp(1.0f, 8.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus)
+		* SSPT_IL_AMOUNT * lerp(1.0f, 2.5f, mDbgSSGIModeGain);
+
+	float3 finalGi = avgRadiance * giGain;
+
+	return float4(clamp(finalGi, 0.0f, 100.0f), saturate(avgOcclusion));
+}
+
+#endif // RAY_MMD_SSPT_TRACE_FXSUB

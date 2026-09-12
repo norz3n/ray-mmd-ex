@@ -1,0 +1,159 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Path Tracing (SSPT / RTGI) Spatial Denoiser
+ *
+ * Module: SSPT_Filter.fxsub
+ * Edge-Preserving Cross-Bilateral Spatial Denoising Filter ported from SSGI.
+ * Preserves high-frequency geometric contours using view-space plane-distance and normal weighting.
+ */
+
+#ifndef RAY_MMD_SSPT_FILTER_FXSUB
+#define RAY_MMD_SSPT_FILTER_FXSUB
+
+#include "shader/SSPT/SSPT_Common.fxsub"
+#include "shader/BilateralCommon.fxsub"
+
+/**
+ * Geometry-aware radiance outlier clamp and stochastic speckle prefilter.
+ * Employs Karis luminance weighting and cross-bilateral geometry gating
+ * to suppress stochastic ray noise spikes before separable blurring.
+ */
+float4 SSPTOutlierRejectPS(
+	in float2 uvCoord : TEXCOORD0,
+	in float3 viewDir : TEXCOORD1,
+	uniform sampler source) : COLOR
+{
+	float zCenter = GetSSPTLinearDepth(uvCoord);
+	if (!(zCenter > 0.0f && zCenter < 1000.0f))
+		return float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+	float4 projInfo = GetProjConstant();
+	float3 nCenter = GetSSPTNormal(uvCoord);
+	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
+
+	float2 tapStep = ViewportOffset2;
+	float planeThreshold = max(zCenter * 0.045f, 0.45f);
+	float depthTolerance = max(zCenter * 0.075f, 0.70f);
+
+	float totalW = 0.0f;
+	float3 totalC = 0.0f;
+
+	[unroll]
+	for (int y = -2; y <= 2; ++y)
+	{
+		float wy = (y == 0) ? 6.0f : ((abs(y) == 1) ? 4.0f : 1.0f);
+		[unroll]
+		for (int x = -2; x <= 2; ++x)
+		{
+			float wx = (x == 0) ? 6.0f : ((abs(x) == 1) ? 4.0f : 1.0f);
+			float2 tapUv = uvCoord + float2(x, y) * tapStep;
+
+			float zTap = GetSSPTLinearDepth(tapUv);
+			if (!(zTap > 0.0f && zTap < 1000.0f))
+				continue;
+
+			float3 pTap = GetViewPosition(projInfo, tapUv, zTap);
+			float planeDist = abs(dot(nCenter, pTap - pCenter));
+			float planeWeight = BilateralPlaneWeight(planeDist, planeThreshold);
+			float depthWeight = BilateralDepthWeight(zTap, zCenter, depthTolerance);
+			float geomWeight = max(planeWeight, depthWeight * 0.40f);
+
+			float3 nTap = GetSSPTNormal(tapUv);
+			float normalWeight = saturate(0.30f + 0.70f * BilateralNormalWeight(nTap, nCenter));
+
+			float3 sampleColor = clamp(tex2Dlod(source, float4(tapUv, 0.0f, 0.0f)).rgb, 0.0f, 100.0f);
+			float sampleLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
+
+			// Karis luminance weighting: suppresses extreme fireflies without distorting linear field
+			float lumaWeight = 1.0f / (1.0f + 0.20f * sampleLuma);
+			float weight = (wx * wy) * geomWeight * normalWeight * lumaWeight;
+
+			totalC += sampleColor * weight;
+			totalW += weight;
+		}
+	}
+
+	float3 filtered = totalC / max(totalW, 1e-5f);
+	return float4(filtered, 0.0f);
+}
+
+/**
+ * Separable A-Trous Cross-Bilateral Filter Pass.
+ * Expands step footprint across stages (stride 1 -> stride 2) to reconstruct smooth low-frequency GI
+ * while strictly preserving normal creases, geometric silhouettes, and depth contours.
+ */
+float4 SSPTBlurPS(
+	in float2 uvCoord : TEXCOORD0,
+	in float3 viewDir : TEXCOORD1,
+	uniform sampler source,
+	uniform float isHorizontal,
+	uniform float stepScale) : COLOR
+{
+	float zCenter = GetSSPTLinearDepth(uvCoord);
+	if (!(zCenter > 0.0f && zCenter < 1000.0f))
+		return float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+	float4 projInfo = GetProjConstant();
+	float3 nCenter = GetSSPTNormal(uvCoord);
+	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
+
+	// Dyadic step progression: step 1.0 (dense) then step 2.0 (wavelet scale) prevents grid lattice aliasing
+	float stepActual = (stepScale > 1.5f) ? 2.0f : 1.0f;
+	float2 blurDir = (isHorizontal > 0.5f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * stepActual;
+	float planeThreshold = max(zCenter * (0.050f * stepActual), 0.50f * stepActual);
+	float depthTolerance = max(zCenter * (0.080f * stepActual), 0.80f * stepActual);
+
+	float blurSigma = float(SSGI_RADIUS) * 0.5f;
+	float spatialFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
+
+	float totalW = 1.0f;
+	float3 totalC = clamp(tex2Dlod(source, float4(uvCoord, 0.0f, 0.0f)).rgb, 0.0f, 100.0f);
+
+	[loop]
+	for (int i = 1; i <= SSGI_RADIUS; ++i)
+	{
+		float spatialWeight = exp(-float(i * i) * spatialFalloff);
+		float2 shift = blurDir * float(i);
+
+		float2 uvA = uvCoord + shift;
+		float2 uvB = uvCoord - shift;
+
+		float zA = GetSSPTLinearDepth(uvA);
+		float zB = GetSSPTLinearDepth(uvB);
+
+		if (zA > 0.0f && zA < 1000.0f)
+		{
+			float3 pA = GetViewPosition(projInfo, uvA, zA);
+			float planeDistA = abs(dot(nCenter, pA - pCenter));
+			float planeWeightA = BilateralPlaneWeight(planeDistA, planeThreshold);
+			float depthWeightA = BilateralDepthWeight(zA, zCenter, depthTolerance);
+			float geomWeightA = max(planeWeightA, depthWeightA * 0.35f);
+
+			float3 nA = GetSSPTNormal(uvA);
+			float normalWeightA = saturate(0.25f + 0.75f * BilateralNormalWeight(nA, nCenter));
+			float wA = spatialWeight * geomWeightA * normalWeightA;
+
+			totalC += clamp(tex2Dlod(source, float4(uvA, 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wA;
+			totalW += wA;
+		}
+
+		if (zB > 0.0f && zB < 1000.0f)
+		{
+			float3 pB = GetViewPosition(projInfo, uvB, zB);
+			float planeDistB = abs(dot(nCenter, pB - pCenter));
+			float planeWeightB = BilateralPlaneWeight(planeDistB, planeThreshold);
+			float depthWeightB = BilateralDepthWeight(zB, zCenter, depthTolerance);
+			float geomWeightB = max(planeWeightB, depthWeightB * 0.35f);
+
+			float3 nB = GetSSPTNormal(uvB);
+			float normalWeightB = saturate(0.25f + 0.75f * BilateralNormalWeight(nB, nCenter));
+			float wB = spatialWeight * geomWeightB * normalWeightB;
+
+			totalC += clamp(tex2Dlod(source, float4(uvB, 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wB;
+			totalW += wB;
+		}
+	}
+
+	return float4(totalC / max(totalW, 1e-5f), 0.0f);
+}
+
+#endif // RAY_MMD_SSPT_FILTER_FXSUB

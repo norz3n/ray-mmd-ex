@@ -1,0 +1,130 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Path Tracing (SSPT / RTGI) Common Declarations
+ *
+ * Module: SSPT_Common.fxsub
+ * Independent Screen-Space Path Traced Global Illumination Pipeline based on qUINT RTGI.
+ * Provides quality presets, controller bindings, ray generation utilities, and geometry decoding helpers.
+ */
+
+#ifndef RAY_MMD_SSPT_COMMON_FXSUB
+#define RAY_MMD_SSPT_COMMON_FXSUB
+
+// Unified quality presets for Screen-Space Path Tracing
+#if GI_QUALITY == 1
+#	define SSPT_RAY_COUNT 4
+#	define SSPT_STEPS 12
+#elif GI_QUALITY == 2
+#	define SSPT_RAY_COUNT 8
+#	define SSPT_STEPS 12
+#elif GI_QUALITY == 3
+#	define SSPT_RAY_COUNT 12
+#	define SSPT_STEPS 14
+#elif GI_QUALITY == 4
+#	define SSPT_RAY_COUNT 16
+#	define SSPT_STEPS 16
+#else
+#	define SSPT_RAY_COUNT 8
+#	define SSPT_STEPS 12
+#endif
+
+#ifndef SSGI_RADIUS
+#	define SSGI_RADIUS 16
+#endif
+#ifndef SSPT_RADIUS
+#	define SSPT_RADIUS 16
+#endif
+
+// Default parameters (can be overridden via ray.conf)
+#ifndef SSPT_SAMPLE_RADIUS
+#	define SSPT_SAMPLE_RADIUS 16.0f
+#endif
+
+#ifndef SSPT_Z_THICKNESS
+#	define SSPT_Z_THICKNESS 1.0f
+#endif
+
+#ifndef SSPT_IL_AMOUNT
+#	define SSPT_IL_AMOUNT 2.0f
+#endif
+
+#ifndef SSPT_AO_AMOUNT
+#	define SSPT_AO_AMOUNT 1.0f
+#endif
+
+#ifndef SSPT_BOUNCES
+#	define SSPT_BOUNCES 1
+#endif
+
+#ifndef SSPT_BOUNCE_WEIGHT
+#	define SSPT_BOUNCE_WEIGHT 0.35f
+#endif
+
+#ifndef SSPT_ISOMETRIC_SAMPLING
+#	define SSPT_ISOMETRIC_SAMPLING 0
+#endif
+
+#ifndef SSPT_FILTER_SENSITIVITY
+#	define SSPT_FILTER_SENSITIVITY 1.0f
+#endif
+
+// Mathematical and sampling constants (qUINT RTGI specification)
+static const float SSPT_GOLDEN_ANGLE = 2.39996323f;
+static const float2x2 SSPT_ROTX = float2x2(-0.10280598f, -0.99470145f, 0.99470145f, -0.10280598f);
+static const float SSPT_Bayer1D[8] = { 1.0f, 5.0f, 3.0f, 7.0f, 2.0f, 6.0f, 4.0f, 8.0f };
+
+// Controller item bindings
+float mSSGIIntensityPlus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI+"; >;
+float mSSGIIntensityMinus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI-"; >;
+
+// DebugController tuning knobs
+float mDbgSSGIEmissiveBoost : CONTROLOBJECT < string name="DebugController.pmx"; string item = "SSGIEmissiveBoost"; >;
+float mDbgSSGIModeGain      : CONTROLOBJECT < string name="DebugController.pmx"; string item = "SSGIModeGain"; >;
+float mDbgSSGISkyLight      : CONTROLOBJECT < string name="DebugController.pmx"; string item = "SSGISkyLight"; >;
+
+/**
+ * Fetches linear view-space depth for SSPT processing.
+ */
+inline float GetSSPTLinearDepth(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0.0f, 0.0f)).r;
+}
+
+/**
+ * Decodes view-space surface normal for SSPT processing.
+ */
+inline float3 GetSSPTNormal(float2 uv)
+{
+	return DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uv, 0.0f, 0.0f)));
+}
+
+/**
+ * Constructs an orthonormal tangent space basis matrix from surface normal.
+ * Implements Marty McFly's projected axis algorithm for optimal stability and smooth transitions.
+ */
+inline float3x3 BuildTangentMatrix(float3 n)
+{
+	float3 e1proj = float3(1.0f, 0.0f, 0.0f) - n.x * n;
+	float3 e2proj = float3(0.0f, 1.0f, 0.0f) - n.y * n;
+	float3 e3proj = float3(0.0f, 0.0f, 1.0f) - n.z * n;
+
+	float3 longest = dot(e1proj, e1proj) > dot(e2proj, e2proj) ? e1proj : e2proj;
+	longest = dot(longest, longest) > dot(e3proj, e3proj) ? longest : e3proj;
+	longest = normalize(longest);
+
+	float3 t = longest;
+	float3 b = cross(t, n);
+
+	return float3x3(t, b, n);
+}
+
+/**
+ * Analytical branchless scaling factor to clip a 2D ray step exactly to viewport margins.
+ */
+inline float ClipRayToScreenEdge(float2 rayStart, float2 rayStep)
+{
+	float2 targetUV = lerp(0.002f, 0.998f, step(0.0f, rayStep));
+	float2 clipAxes = abs(targetUV - rayStart) / (abs(rayStep) + 1e-7f);
+	return saturate(min(clipAxes.x, clipAxes.y));
+}
+
+#endif // RAY_MMD_SSPT_COMMON_FXSUB
