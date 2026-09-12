@@ -24,27 +24,31 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.9) :
+Reforge Exclusive Features (through v1.20.15) :
 ------------
 
 **Direct Screen-Space Core**
 * **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z), freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching, McGuire 2014 2D DDA, and Newton root-finding.
 * **Octahedral Normal Encoding**: compact and high-precision octahedral representation for unit normal vectors in G-buffer and math pipelines.
 
-**Global Illumination (SSGI 3.0)**
-* **Screen Space Global Illumination (SSGI 3.0)**: complete 3D cosine-weighted hemisphere raymarching engine with screen-space short-range indirect tracing. Replaces 2D screen-disk gather with branchless Duff 2017 orthonormal tangent space transform, stratified Halton (2, 3) sampling, per-pixel Interleaved Gradient Noise (IGN) rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and adaptive depth thickness gating.
-* **Dyadic À-Trous Cross-Bilateral Denoising**: two-pass edge-preserving filter with $5 \times 5$ Karis 0.20 outlier rejection and tangent-plane distance weights (`BilateralPlaneWeight`) eliminating noise and blur artifacts while retaining sharp geometric contact edges.
-* **Indirect Multi-Bounce & Sky Radiance**: Jimenez-style albedo compensation, hemispherical Lambertian emission lobe, quadratic AO attenuation, and outdoor sky radiance fallback.
-* **Rough Specular GI**: cone-angle-controlled glossy indirect reflections with tunable debug morphs.
-* **Visibility Masking**: dedicated SSGI visibility pass (`SSGIVisibilityMap`) with quality presets to suppress self-illumination feedback on skin.
-* **Photometric Compression**: Reinhard soft-knee curve for natural dynamic range in lit scenes.
+**Global Illumination (SSPT / RTGI & SSGI 3.0)**
+* **Screen-Space Path Tracing (SSPT / RTGI 3.0 - `GI_ENABLE 3`, Default)**: next-generation path-traced room radiance engine inspired by Marty McFly's qUINT RTGI. Implements low-discrepancy Monte Carlo cosine-weighted hemisphere path tracing with golden angle rotation (`SSPT_GOLDEN_ANGLE = 2.39996323`), 1D Bayer dither stratification, and projected-axis orthonormal tangent frame (`BuildTangentMatrix`).
+* **Progressive Quadratic Ray Stepping & Depth Thickness Gating**: dense near-field precision with broad room reach (`lambda = s * sqrt(s)`), analytical depth thickness gating (`delta = (pSample - pRay) * invThickness`) preventing light leaking through walls, fingers, and hair.
+* **Secondary Bounce Feedback & Viewport-Boundary Radiance**: multi-bounce reflection feedback loop (`SSPT_BOUNCES 1`) with emissive transfer and escaped-ray sky radiance sampling preventing dark camera-edge halos.
+* **Albedo-Driven Dynamic Skin Multi-Bounce & Linearized Cavity AO**: dynamic albedo interreflection curve (`1.0 + (mat.albedo * 2.2) / max(...)`) and softened linear cavity AO in SSPT/SSGI resolves, eliminating skin darkening and crushing in deep shadows.
+* **Dielectric Glass Resolve Bypass & Raymarch Transmission**: early-exit zero diffuse GI combine on `SHADINGMODELID_GLASS` preventing milky/matte fogging, and raymarch hit skipping (`continue`) allowing rays to transmit through glass without false bounce or artificial shadows.
+* **SSGI 3.0 (`GI_ENABLE 1 / 2`)**: Duff (2017) branchless orthonormal basis, stratified Halton (2, 3) sampling, per-pixel IGN rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and early thickness evaluation.
+* **Dyadic À-Trous Cross-Bilateral Denoising**: two-pass edge-preserving filter with $5 \times 5$ Karis 0.20 outlier rejection, `[loop]` SM 3.0 instruction optimization, and tangent-plane distance weights (`BilateralPlaneWeight`).
+* **Unified Quality Presets (`GI_QUALITY 1..4`)**: shared presets across SSGI and SSPT from Low (12 steps / 4 rays) to Cinematic (16 steps / 16 rays).
+* **Rough Specular GI (`SSGI_SPECULAR_GI 1`)**: Fresnel-weighted indirect specular reflections on rough surfaces, with calibrated subtle sheen on skin (`0.25f`).
 
 **Reflections & Occlusion**
 * **McGuire 2014 2D DDA Screen-Space Reflections**: full-featured screen-space ray tracing engine with hybrid bisection & secant root-finding, subpixel binary refinement, and LOD-0 mirror gloss resolve without jitter or contact gaps.
+* **Stabilized Thin & Curved Glass Refraction**: view-space normal-tilt screen-space offset eliminating planar background object duplication on flat windows, physical thin-glass default (`customA = 0.5`), balanced chromatic dispersion, deflection clamping, and Newton's method 3D root-finding (Mayer et al. 2026).
 * **Top-Down Sky Visibility & Heightfield Macro AO**: Snowdrop Engine (GDC 2016) directional horizon search and cone-tracing macro ambient occlusion preventing outdoor skylight and ambient IBL from leaking into covered spaces, under canopies, bridges, roofs, and doorways. Controlled via dedicated `SkyVisibilityController.pmx`.
 * **Ground-Truth Ambient Occlusion (GTAO / GTSO)**: reference XeGTAO cosine horizon integration, Jimenez multi-bounce approximation, temporal history stabilization, and directional bent normals.
 * **Hybrid HBAO / SSDO**: horizon-based and directional occlusion for accurate contact shading.
-* **Contact Shadows**: screen-space contact shadows with depth-discontinuity artifact fixes.
+* **Contact Shadows**: screen-space contact shadows with depth-discontinuity artifact fixes and continuous penetration-based penumbra.
 
 **Lighting & Shadows**
 * **Percentage-Closer Soft Shadows (PCSS)**: contact-hardening soft shadows for cascaded directional sun lights with world-space continuity, dynamic blocker search, and soft penumbra filtering.
@@ -55,31 +59,32 @@ Reforge Exclusive Features (through v1.20.9) :
 
 **Materials & BRDF**
 * **Energy-Preserving Oren-Nayar (EON) BRDF**: exact Portsmouth, Kutz & Hill (JCGT 2025) diffuse model preserving energy across all roughness levels.
-* **Pre-Integrated Skin Curvature SSS & Dual-Lobe GGX Specular**: physically based multi-spectral skin diffusion wrapping light smoothly into deep shadow with an intrinsic epidermal baseline wrap (`baseWrap = float3(0.45, 0.22, 0.08)`) and an infinitely smooth $C^1$ quadratic terminator (`saturate(1 - (N.L)^2)`), eliminating harsh terminator cuts across flat and cylindrical anatomy. Dual-layer dermal/epidermal specular reflections.
-* **Expanded 48-Preset Material Library**: comprehensive PBR and Toon material suites across Architecture (parquet, wet asphalt, tiles, rough wood, brick, concrete, polished marble), Cloth (leather, latex, denim, wool, stockings, lace), Nature (dirt, mud, snow with micro-glitter, ice, sand, tree bark), and Sci-Fi (anisotropic carbon fiber, hologram with hashed alpha, cyber grid, diamond).
+* **Unified UE Artist Skin SSS Toolchain**: WrappedDiffuse (`w=1/3, n=1.5`), AO-scaled BackScatter, view-dependent InScatter, Beer-Lambert transmission with HSV hue shift, Henyey-Greenstein backlit forward glow (`SubsurfaceShadingBacklitGlow`), and explicit sRGB transmittance authoring.
+* **Texture-Space SSS Diffusion (`SSSS_TEXSPACE 1`)**: camera distance-invariant model UV-space irradiance convolution with Christensen-Burley profile, eliminating screen-space silhouette haloing and hair light bleeding.
+* **ClearCoat Analytical Refraction & Beer-Lambert Absorption**: Snell refraction angle deflection (`RefractBlendClearCoatApprox`) and thin-layer Beer-Lambert optical transmission through clearcoat without tracing secondary rays.
+* **Two-Sided Wrapped Diffuse Transmission**: Steve McAuley (2011) energy-conserving backlit translucency for foliage, leaves, paper, petals, and thin cloth (`SubsurfaceShadingTwoSided`).
+* **Analytical Eye Iris Caustic Highlight**: Jimenez (2014) focused iris caustic model for anime and realistic eyes (`EyeIrisCaustic`).
+* **Optimized Dual-Lobe Skin Specular & Burley Hair Specular**: single-pass Smith visibility and Fresnel evaluation for dual-profile skin, and Burley energy-preserving aspect ratio parameterization for anisotropic hair highlights without flickering.
+* **Band-Limited Hashed Alpha Hair Cutout & Dedicated `_realistic` Presets**: Dave Hoskins `Hash31` without trigonometric precision loss, band-limited boundary stippling (`[ALPHA_THRESHOLD ± 0.12]`) with 100% solid grain-free interior (`alpha >= 0.62`), pass synchronization with SSSS protection, and 40 dedicated `*_realistic.fx` presets across the hair library.
+* **Expanded 48-Preset Material Library**: comprehensive PBR and Toon material suites across Architecture, Cloth, Nature, and Sci-Fi.
 * **Procedural Eye Cornea Parallax & Micro-Glitter**: true refractive cornea dome with iris parallax depth mapping (`material_eye_anime.fx`) and multi-layer procedural micro-glitter sparkle presets (`material_glitter.fx`).
-* **Procedural Hair Materials**: mathematical anisotropic hair normals plus Kajiya-Kay highlights — ported hbee hair presets with no heavy static textures.
-* **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and upgraded Charlie Sheen distribution.
-* **Ultrafast Glass Refraction**: Newton's method screen-space refraction root-finding (Mayer et al. 2026) converging in 3–4 iterations directly against the G-buffer with chromatic dispersion.
-* **Forced Transparency Presets**: make an opaque PMX material transparent without editing the model — plain and glass (SHADINGMODELID_GLASS refraction) variants, shaded through the alpha gbuffer with the model's own texture and MMD diffuse.
-* **Wetness Special-Case Material**: now with ordered-dither alpha clipping; alpha cutout threshold unified at 0.5 across all passes.
-* **Procedural Foliage Wind**: vertex wind animation engine with four vegetation presets.
-* **Advanced Surface Detail**: thin-film iridescence, specular geometric anti-aliasing (LEAN/CLEAN), Ultra Quality bump maps, and expanded Auto-Normal material presets.
-* **Practical Real-Time Hex-Tiling**: stochastic equilateral triangle lattice tiling (Mikkelsen 2022) with slope-weighted normal blending, luminance contrast adjustment, height-blended displacement, and distance-adaptive LOD fade, eliminating visible tiling repetition on terrain, floors, and fabrics without precomputed LUTs.
-* **Hashed Alpha Testing**: scale-invariant stochastic dither (Wyman & McGuire 2017) integrated with TAA for silky-smooth, soft anti-aliased transparency on hair, eyelashes, foliage, and cloth with full G-buffer depth and shadow casting.
-* **Detail Normal Maps & Micro-Surface Layering**: distance-faded micro-surface normal overlay (skin pores, fabric weave, rock grit) composited via Reoriented Normal Mapping (RNM).
+* **Procedural Foliage Wind Engine**: vertex wind animation engine with four vegetation presets.
+* **Practical Real-Time Hex-Tiling**: stochastic equilateral triangle lattice tiling (Mikkelsen 2022) with slope-weighted normal blending, luminance contrast adjustment, height-blended displacement, and distance-adaptive LOD fade.
+* **Detail Normal Maps & Micro-Surface Layering**: distance-faded micro-surface normal overlay composited via Reoriented Normal Mapping (RNM).
+* **Authorable Shading Knobs**: `SPEC_LIGHT_SIN_ALPHA` (SphereMaxNoH softening), `BRDF_FRESNEL_TYPE 1` (Adobe F82), `BRDF_CLOTH_VIS_CHARLIE 1` (Estevez & Kulla exponential fit), `SKIN_AO_STRENGTH 0.50`, `SKIN_GI_REFLECTANCE_LIGHT 0.68f`, and `SKIN_SSS_MFP_SCALE`.
 
 **Post-Processing & Anti-Aliasing**
+* **SMAA Ultra+ (`AA_QUALITY 5`, Default)**: native 1x Ultra pipeline, G-Buffer linear depth predication (`Gbuffer8Map`) resolving fine hair tips and accessory silhouettes, dual-axis bilinear sample weights eliminating diagonal staircasing, subpixel micro-feature reconstruction (`0.65f`), and 12-sample FXAA Preset 12 HQ.
 * **Studio Color Grading Engine & Dedicated Controller (`ColorGradingController.pmx`)**: built-in linear HDR 3-way split-toning (Lift/Gamma/Gain for Shadows, Midtones, and Highlights) with perceptual Naka-Rushton luma partitioning, 2D white balance (Correlated Color Temperature + Green/Magenta Tint), smart skin-preserving Vibrance, branchless 3D Rodrigues Hue rotation, and cinematic creative presets (Teal & Orange, Bleach Bypass, Cross Process, Monochrome) controlled via a dedicated 60-morph PMX controller.
 * **G-DLAA Anti-Aliasing**: hybrid geometric and directionally adaptive anti-aliasing (`AA_QUALITY 7`) preserving sharp silhouette edges.
 * **Temporal Anti-Aliasing (TAA)**: 5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history.
 * **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.
-* **Camera & Object Motion Blur**: cinematic screen-space velocity motion blur reconstructed from camera view-projection history and animated mesh velocity maps.
+* **Camera & Object Motion Blur**: cinematic screen-space velocity motion blur reconstructed from camera view-projection history and animated mesh velocity maps with isotropic screen-unit clamping.
 * **CineStill 800T Multi-Scale Halation & Spectral Bloom**: physical radial wavelength dispersion and multi-octave red-amber emulsion highlight bleed simulating real 35mm film base back-scattering (`FILMIC_HALATION_MODE 2`).
 * **Cinematic Bokeh DOF**: hexagonal and cinematic bokeh with Cat's Eye optical mechanical vignetting deformation.
 * **Anti-Firefly Bloom & FidelityFX CAS**: Karis 13-tap downsampling filter and AMD FidelityFX Contrast Adaptive Sharpening.
-* **Core Engine Performance Optimizations**: hoisted matrix projections in contact shadows, XeGTAO square-root horizon identity, point/spot light distance clipping, pre-scaled Vogel-disk PCF rotation, SSGI rsqrt ray steps, and Gerstner wave Hessian constant precomputations.
-* **2-Band Cel-Shading**: optional stylized ramp integrated into the lighting path.
+* **Core Engine Performance Optimizations**: hoisted matrix projections in contact shadows, XeGTAO square-root horizon identity, point/spot light distance clipping, pre-scaled Vogel-disk PCF rotation, SSGI/SSPT rsqrt ray steps, and Gerstner wave Hessian constant precomputations.
+* **Clean AA Tail Ping-Pong**: single-consumer pipelines routed through `ShadingMapTemp2` to eliminate D3D9 feedback loops, with HDR `A16B16G16R16F` TAA accumulator.
 
 **Toon Rendering**
 * **Community Toon Grading**: shadow color grade (multiply / add / hue-rotate / luminance-preserving warmth), low-saturation auto-tint for colorless albedos, Jashin self-power shadow fallback, and silhouette rim light folded into the cel bands — ported from HAToon2/PAToon2, M4Toon2, Jashin Toon and T_ToonShader as `ray.conf` knobs.
@@ -178,6 +183,7 @@ Contact:
 
 Credits :
 --------
+* Screen-Space Path Tracing (SSPT / RTGI) based on Marty McFly's (Pascal Gilcher) qUINT RTGI.
 * PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) 2D DDA ray traversal.
 * Ultrafast Screen-Space Refractions via Newton's Method based on Chase Mayer, Ulf Assarsson & Erik Sintorn (JCGT 2026).
 * Energy-Preserving Oren-Nayar (EON) diffuse BRDF based on Jamie Portsmouth, Peter Kutz & Stephen Hill (JCGT 2025).
@@ -185,14 +191,17 @@ Credits :
 * Hashed Alpha Testing based on Chris Wyman & Morgan McGuire (I3D 2017).
 * Percentage-Closer Soft Shadows (PCSS) based on Randima Fernando (NVIDIA 2005).
 * Ground-Truth Ambient Occlusion (GTAO) based on Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo (Activision 2016).
+* Subpixel Morphological Anti-Aliasing (SMAA 1x Ultra+) based on Jorge Jimenez, Jose I. Echevarria et al. (2012).
 * Directionally Adaptive Anti-Aliasing (DLAA / G-DLAA) based on Dmitry Andreev (LucasArts / Game Developer 2011).
 * Volumetric Cumulus Cloud Modeling & Lighting based on SA_DirectX 3.0 and Frostbite/Nubis (Decima Engine / Guerrilla Games).
 * HBSSDO rendering concepts referenced from [dendewa](https://dendewa.vercel.app/).
 * AgX Tone Mapping per the official Blender 4.0 implementation ([link](https://github.com/EaryChow/AgX)).
 * Karis anti-firefly downsampling and luma weighting from Brian Karis' "Next Generation Post Processing in Call of Duty: Advanced Warfare".
+* Polynomial hash without sine functions based on Dave Hoskins (Hash31).
 
 References :
 --------
+* Screen-Space Path Tracing / qUINT RTGI (Pascal Gilcher) \[[link](https://github.com/martymcmodding/qUINT)\].
 * An Energy-Preserving Oren-Nayar Diffuse BRDF (Portsmouth, Kutz, Hill) \[[link](https://jcgt.org/published/0014/01/01/) | [PDF](./ref-docs/Portsmouth2025EON.pdf)\].
 * Practical Real-Time Hex-Tiling (Mikkelsen) \[[link](https://jcgt.org/published/0011/02/01/) | [PDF](./ref-docs/Mikkelsen2022Hex.pdf)\].
 * Hashed Alpha Testing (Wyman & McGuire) \[[link](https://research.nvidia.com/publication/2017-02_hashed-alpha-testing)\].
@@ -268,8 +277,19 @@ Every algorithm named in the SSGI module comments (`SSGI_Trace / SSGI_Filter / S
 | Cosine-weighted hemisphere Monte Carlo sampling | cosinelobe importance sampling with Shirley-concentric mapping (M. Shirley & K. Chiu 1997, "A Low Distortion Map Between Disk and Square") |
 | Multi-bounce occlusion response (AO² quadratic crevice absorption) + albedo-compensated multi-bounce `multiBounce` (`SSGI_Resolve.fxsub:38–91`) | J. Jimenez et al. 2016 GTAO multi-bounce approximation \[[link](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_一提.pdf)\] |
 | Reinhard photometric compression for skin reception (`SSGI_Resolve.fxsub:62`) | E. Reinhard et al. 2002, "Photographic Tone Reproduction for Digital Imaging" |
-| Rough indirect specular slice via Fresnel(F0)-weighted gathered irradiance (`SSGI_Resolve.fxsub:93–103`) | rough-indirect-specular from diffuse irradiance approximation (community/GDC-proven approach used alongside mirror-gloss SSR) |
-| Checkerboard-YCbCr 2-tap sky radiance decode `SampleSkyRadiance` (`SSGI_Trace.fxsub:24–33`) | 4:2:0-style chroma-subsampled checkerboard packing (native ray-mmd `EnvLightMap` encoding) |
-| Sky/IBL seamless fallback for escaped rays + distance/vignetting falloff | standard screen-space raymarching fallback (by effect scope in the IBL unit) |
+#### Screen-Space Path Tracing (SSPT / RTGI) — `Shader/SSPT/`
+Algorithms implemented in the Screen-Space Path Tracing module, mapped to their primary sources:
+
+| Algorithm (location) | Source |
+|---|---|
+| Screen-space path tracing with golden angle rotation (`SSPT_Trace.fxsub`) | P. Gilcher (Marty McFly) 2019–2023, "qUINT RTGI" \[[link](https://github.com/martymcmodding/qUINT)\]; low-discrepancy golden spiral Monte Carlo cosine hemisphere integration |
+| Projected-axis tangent basis `BuildTangentMatrix` (`SSPT_Trace.fxsub`) | P. Gilcher (qUINT RTGI) orthonormal projection around surface normals |
+| Progressive quadratic ray stepping $\lambda = s\sqrt{s}$ (`SSPT_Trace.fxsub`) | Progressive near-field/far-field step expansion balancing contact shadow accuracy and room reach |
+| Analytical thickness delta gating (`SSPT_Trace.fxsub`) | qUINT RTGI depth thickness delta test eliminating light leaking through thin geometry |
+| Secondary bounce indirect feedback loop (`SSPT_Resolve.fxsub`) | Screen-space multi-bounce radiance propagation (`SSPT_BOUNCES`) with emissive transfer |
+| Separable cross-bilateral À-Trous wavelet filter (`SSPT_Filter.fxsub`) | Dyadic stride progression with Karis luminance outlier rejection and normal/depth bilateral edge stops |
+| Albedo-driven dynamic skin multi-bounce curve (`SSPT_Resolve.fxsub`) | Dynamic interreflection scaling preventing skin crushing under indirect bounces |
+| Glass resolve bypass & transmission hit skipping (`SSPT_Resolve.fxsub`, `SSPT_Trace.fxsub`) | Optical glass transmission bypass preserving dielectric transparency without diffuse fogging |
 
 * (And many more from the original development team...)
+
