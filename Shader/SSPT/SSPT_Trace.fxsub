@@ -45,6 +45,8 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 	// Receiver shading model check
 	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord.xy, 0.0f, 0.0f)).a);
+	if (receiverModel == SHADINGMODELID_GLASS)
+		return 0.0f;
 	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
 
 	// World gather radius and depth thickness scaling
@@ -138,9 +140,13 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					float distSq = dot(delta, delta);
 					if (distSq < 1.0f)
 					{
+						int hitModel = (int)floor(g8Sample.a);
+						// Glass is transparent dielectric: rays transmit through instead of reflecting diffuse bounce
+						if (hitModel == SHADINGMODELID_GLASS)
+							continue;
+
 						intersected = saturate(1.0f - distSq);
 
-						int hitModel = (int)floor(g8Sample.a);
 						bool isEmissive = (hitModel == SHADINGMODELID_EMISSIVE);
 						bool isSkinEmitter = (hitModel == SHADINGMODELID_SKIN || hitModel == SHADINGMODELID_SUBSURFACE);
 

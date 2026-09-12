@@ -61,6 +61,8 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 	// Receiver shading model check
 	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord.xy, 0.0f, 0.0f)).a);
+	if (receiverModel == SHADINGMODELID_GLASS)
+		return 0.0f;
 	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
 
 	// Adaptive gather world radius scaling
@@ -172,6 +174,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 						if (NdotL > 0.02f)
 						{
 							int shadingModel = (int)floor(g8.a);
+							// Glass is transparent dielectric: rays transmit through instead of reflecting diffuse bounce
+							if (shadingModel == SHADINGMODELID_GLASS)
+								continue;
+
 							bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
 							bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
 
