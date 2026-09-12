@@ -11,20 +11,19 @@
 #define SHADINGMODELID_MASK       10
 
 // How much SSAO/HBAO (and sun-shadow softening) affects skin (0 = ignored,
-// 1 = same as other materials).  Kept below 1 so skin keeps its soft SSS
-// falloff, but high enough that contact shadows actually ground the figure.
-#define SKIN_AO_STRENGTH          0.75
-// Dermal reflectance range for GI (light skin ~30-45%, dark ~10-20%; melanin/hemoglobin absorption).
-#define SKIN_GI_REFLECTANCE_DARK  0.15f
-#define SKIN_GI_REFLECTANCE_LIGHT 0.42f
+// 1 = same as other materials). Kept moderate so skin keeps its soft SSS
+// falloff without crushing shadow regions into unnatural darkness.
+#define SKIN_AO_STRENGTH          0.50
+// Dermal reflectance range for GI (light skin ~55-70%, dark ~20-35%; balances physical absorption with MMD authored textures).
+#define SKIN_GI_REFLECTANCE_DARK  0.22f
+#define SKIN_GI_REFLECTANCE_LIGHT 0.68f
 // Total skin diffuse response (Lambert + wrap + translucency + IBL back-light) is capped at
 // BUDGET x incident irradiance. 1.0 = strict physical conservation (SSS only redistributes
 // energy); >1.0 lets the brightest texture regions (blush, highlights) keep their punch for
 // a more artistic glowing look, at the cost of skin possibly outshining white surfaces.
 #define SKIN_SSS_ENERGY_BUDGET    1.40f
-// SSGI brightness compensation: max +10% on reception, scaled by luminance (dim skin gets ~0,
-// bright skin gets the full cap)
-#define SKIN_GI_COMPENSATION      0.10f
+// SSGI brightness compensation: recovers photometric loss under indirect bounces
+#define SKIN_GI_COMPENSATION      0.25f
 // SSGI skin bounce suppression: skin throws off too much glow, damp its emitter
 // contribution.  Applied before the mode-2 gather gain (PI*8), so the effective
 // room bounce off skin is scale x PI x 8 x receiver response - keep the raw

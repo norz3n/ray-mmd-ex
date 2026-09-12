@@ -31,23 +31,22 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	// Pre-albedo gathered irradiance, reused below as a local radiance field for indirect specular
 	float3 gatherIrradiance = rawGi;
 
+	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
+
 #if SSDO_QUALITY > 0
 	float rawAO = tex2Dlod(SSDOMapSamp, float4(uvCoord, 0.0f, 0.0f)).w;
 	float occlusion = (mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO;
 #if GI_ENABLE >= 2
 	// Multi-bounce occlusion response: indirect diffuse light in concave corners is exponentially absorbed (AO^2),
 	// allowing SSAO/HBAO to deeply and naturally darken crevices without being washed out by room GI.
-	occlusion = occlusion * occlusion;
+	// Skin SSS diffuses light into cavities, receiving softened linear AO instead of quadratic crevice absorption.
+	occlusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : (occlusion * occlusion);
+#else
+	occlusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : occlusion;
 #endif
 #else
 	float occlusion = 1.0f;
 #endif
-
-	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
-	if (isSkin)
-	{
-		occlusion = lerp(1.0f, occlusion, SKIN_AO_STRENGTH);
-	}
 
 	float3 camDir = normalize(viewDir);
 	float NdV = saturate(dot(mat.normal, camDir));
@@ -86,19 +85,19 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	}
 
 #if GI_ENABLE >= 2
-	float3 multiBounce = isSkin ? 0.95f : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
+	float3 multiBounce = isSkin ? (1.0f + (mat.albedo * 2.2f) / max(1.0f - mat.albedo * 0.5f, 0.1f)) : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
 	rawGi *= multiBounce;
 #endif
 
 #if SSGI_SPECULAR_GI
 	// Rough specular indirect: Fresnel(F0)-weighted slice of the gathered irradiance.
-	// Fades out on mirror-smooth surfaces (SSR covers those) and is skipped for skin/glass/emissive/cloth models.
+	// Fades out on mirror-smooth surfaces (SSR covers those) and is skipped for glass/emissive/cloth models.
 	float3 specGi = 0.0f;
-	if (!isSkin && mat.lightModel != SHADINGMODELID_GLASS && mat.lightModel != SHADINGMODELID_EMISSIVE && mat.lightModel != SHADINGMODELID_CLOTH)
+	if (mat.lightModel != SHADINGMODELID_GLASS && mat.lightModel != SHADINGMODELID_EMISSIVE && mat.lightModel != SHADINGMODELID_CLOTH)
 	{
 		float3 F = mat.specular + (1.0f - mat.specular) * pow(1.0f - NdV, 5.0f);
 		float roughWeight = saturate(1.0f - mat.smoothness * 1.25f);
-		specGi = gatherIrradiance * F * (roughWeight * 0.5f);
+		specGi = gatherIrradiance * F * (roughWeight * (isSkin ? 0.25f : 0.5f));
 	}
 #endif
 

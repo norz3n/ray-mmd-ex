@@ -181,8 +181,8 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 			lastUV = rayUV;
 		}
 
-		// Sky / Environment Radiance for escaped rays
-		if (intersected < 0.25f && insideScreen)
+		// Sky / Environment Radiance for escaped rays (including rays exiting screen bounds)
+		if (intersected < 0.25f)
 		{
 			float NdotSky = saturate(dot(nOrigin, rayDir));
 #if IBL_QUALITY
