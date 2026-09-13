@@ -33,7 +33,7 @@ float3 SampleSkyRadiance(float2 skyUv)
 float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
 	float zOrigin = GetSSPTLinearDepth(uvCoord.xy);
-	if (!(zOrigin > 0.0f && zOrigin < 1000.0f))
+	if (!(zOrigin > 0.0f && zOrigin < 200.0f))
 		clip(-1);
 
 	float4 projInfo = GetProjConstant();
@@ -49,8 +49,9 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		return 0.0f;
 	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
 
-	// World gather radius scaling
+	// World gather radius and depth thickness scaling
 	float maxWorldDistance = max(mSSGIScale * SSPT_SAMPLE_RADIUS * 2.5f, 4.0f) * clamp(mSSGIConeAngle * 2.0f, 0.5f, 3.0f);
+	float invThickness = 1.0f / max((maxWorldDistance * 0.12f) * SSPT_Z_THICKNESS, 0.04f);
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
 #if AA_QUALITY == 6
@@ -134,53 +135,31 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 			if (zSample > 1e-3f && zSample < 1000.0f)
 			{
-				float zDiff = pRay.z - zSample;
-				int hitModel = (int)floor(g8Sample.a);
+				float3 pSample = GetViewPosition(projInfo, rayUV, zSample);
+				float3 delta = (pSample - pRay) * invThickness;
 
-				// Glass is transparent dielectric: rays transmit through instead of reflecting diffuse bounce
-				if (hitModel == SHADINGMODELID_GLASS)
-					continue;
-
-				bool isEmissive = (hitModel == SHADINGMODELID_EMISSIVE);
-				bool isSkinEmitter = (hitModel == SHADINGMODELID_SKIN || hitModel == SHADINGMODELID_SUBSURFACE);
-
-				float rayDist = lambda * currentRayDist;
-				float dynamicThickness = max(0.08f, 0.04f + rayDist * 0.035f * SSPT_Z_THICKNESS);
-				if (isEmissive)
-					dynamicThickness = max(dynamicThickness, 0.35f);
-
-				if (zDiff >= -0.02f && zDiff <= dynamicThickness)
+				// qUINT RTGI thickness collision condition
+				if (delta.z < 0.02f && delta.z > -1.0f)
 				{
-					float3 pSample = GetViewPosition(projInfo, rayUV, zSample);
-					float3 diffOrigin = pSample - pOrigin;
-					float distSq = dot(diffOrigin, diffOrigin);
-
-					if (distSq > 0.005f)
+					float distSq = dot(delta, delta);
+					if (distSq < 1.0f)
 					{
+						int hitModel = (int)floor(g8Sample.a);
+						// Glass is transparent dielectric: rays transmit through instead of reflecting diffuse bounce
+						if (hitModel == SHADINGMODELID_GLASS)
+							continue;
+
+						intersected = saturate(1.0f - distSq);
+
+						bool isEmissive = (hitModel == SHADINGMODELID_EMISSIVE);
+						bool isSkinEmitter = (hitModel == SHADINGMODELID_SKIN || hitModel == SHADINGMODELID_SUBSURFACE);
+
 						float3 nHit = GetSSPTNormal(rayUV);
-						float cosEmitter = isEmissive ? saturate(dot(-nHit, rayDir) * 0.7f + 0.3f) : saturate(dot(-nHit, rayDir));
+						float cosEmitter = isEmissive ? 1.0f : saturate(dot(-nHit, rayDir));
 						float cosReceiver = saturate(dot(nOrigin, rayDir));
 
 						if (cosEmitter > 0.01f || isEmissive)
 						{
-							float x = saturate(zDiff / dynamicThickness);
-							float thickWeight = 1.0f - (x * x * (3.0f - 2.0f * x));
-
-							float dist = sqrt(distSq);
-							float distRatio = saturate(dist / maxWorldDistance);
-							float rayFade = saturate(1.0f - sNorm);
-							float fade = saturate(1.0f - distRatio) * rayFade;
-							fade = fade * fade * (3.0f - 2.0f * fade);
-
-							float2 edgeDist = min(rayUV, 1.0f - rayUV);
-							float edgeFade = smoothstep(0.0f, 0.08f, min(edgeDist.x, edgeDist.y));
-
-							float invDistFalloff = 1.0f / (1.0f + dist * (isEmissive ? 0.02f : 0.035f));
-							float nearContactDamping = smoothstep(0.04f, 0.25f, dist);
-							float atten = fade * edgeFade * invDistFalloff * (isEmissive ? smoothstep(0.01f, 0.15f, dist) : nearContactDamping);
-
-							intersected = saturate(thickWeight * (1.0f - distRatio));
-
 							float3 sampleColor = clamp(tex2Dlod(ShadingMapSamp, float4(rayUV, 0.0f, 0.0f)).rgb, 0.0f, 60.0f);
 
 							if (isEmissive)
@@ -200,7 +179,12 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 #endif
 
 							float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(rayUV, 0.0f, 0.0f)).a;
-							float hitWeight = thickWeight * cosEmitter * cosReceiver * atten * emitterVis;
+							float hitDist = length(pSample - pOrigin);
+							float distRatio = saturate(hitDist / maxWorldDistance);
+							float distFade = saturate(1.0f - distRatio);
+							distFade = distFade * distFade * (3.0f - 2.0f * distFade);
+
+							float hitWeight = intersected * cosEmitter * cosReceiver * emitterVis * distFade;
 
 							hitRadiance = sampleColor * hitWeight;
 							break;
