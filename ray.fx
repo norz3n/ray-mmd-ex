@@ -415,7 +415,7 @@ static float mCausticsDispScale  = lerp(lerp(1.0f, 3.0f, mCstDispersionP), 0.0f,
 #include "shader/math.fxsub"
 #include "shader/common.fxsub"
 #include "shader/textures.fxsub"
-#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE
+#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE == 3)
 #	include "shader/PostProcessMatrix.fxsub"
 #endif
 #include "shader/gbuffer.fxsub"
@@ -816,7 +816,7 @@ technique DeferredLighting<
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #else
-#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE
+#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE || (GI_ENABLE == 3)
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #if POST_SHARPEN_ENABLE
@@ -1554,7 +1554,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 TAAPS(ShadingMapTempSamp);
 	}
 #endif
-#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE
+#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE == 3)
 	pass TAAMatrixUpdatePass<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

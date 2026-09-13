@@ -173,9 +173,20 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							}
 
 #if SSPT_BOUNCES
-							// Multi-bounce secondary bounce gather
-							float3 nextBounce = clamp(tex2Dlod(SSGIMapSamp, float4(rayUV, 0.0f, 0.0f)).rgb, 0.0f, 20.0f);
-							sampleColor += nextBounce * SSPT_BOUNCE_WEIGHT;
+							// Multi-bounce secondary bounce gather with temporal camera reprojection
+							float3 worldSamplePos = mul(float4(pSample, 1.0f), matViewInverse).xyz;
+							float4 prevClipPos = mul(float4(worldSamplePos, 1.0f), GetPrevViewProject());
+							float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5f)) * float2(0.5f, -0.5f) + 0.5f;
+
+							if (all(prevUV >= 0.002f) && all(prevUV <= 0.998f))
+							{
+								float prevDepth = GetSSPTLinearDepth(prevUV);
+								if (abs(prevDepth - pSample.z) < max(0.25f, pSample.z * 0.05f))
+								{
+									float3 nextBounce = clamp(tex2Dlod(SSGIMapSamp, float4(prevUV, 0.0f, 0.0f)).rgb, 0.0f, 20.0f);
+									sampleColor += nextBounce * SSPT_BOUNCE_WEIGHT;
+								}
+							}
 #endif
 
 							float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(rayUV, 0.0f, 0.0f)).a;
