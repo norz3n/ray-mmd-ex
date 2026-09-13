@@ -37,14 +37,9 @@ float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 
 	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
 
-#if SSDO_QUALITY > 0
-	float rawAO = tex2Dlod(SSDOMapSamp, float4(uvCoord, 0.0f, 0.0f)).w;
-	float occlusion = (mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO;
-	// Skin SSS diffuses light into cavities, receiving softened linear AO instead of quadratic crevice absorption
-	occlusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : (occlusion * occlusion);
-#else
+	// AO is applied in a dedicated post-SSGI pass (PostProcessAOComposite.fxsub)
+	// so that it darkens the full composite (direct + IBL + GI) uniformly.
 	float occlusion = 1.0f;
-#endif
 
 	float3 camDir = normalize(viewDir);
 	float NdV = saturate(dot(mat.normal, camDir));
@@ -87,6 +82,19 @@ float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 		float roughWeight = saturate(1.0f - mat.smoothness * 1.25f);
 		specGi = gatherIrradiance * F * (roughWeight * (isSkin ? 0.25f : 0.5f));
 	}
+#endif
+
+#if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
+	float directShadow = tex2Dlod(ShadowMapSamp, float4(uvCoord, 0.0f, 0.0f)).r;
+	// Direct solar shadow retention: prevents SSPT from overriding shadows from ShadowMap.
+	// In direct sunlight (directShadow == 1.0), 100% of GI bounce is retained.
+	// Inside deep cast shadows (directShadow == 0.0), GI is scaled by SSPT_SHADOW_RETENTION,
+	// keeping shadows deep, crisp, and high-contrast while still catching warm/cool bounced light.
+	float shadowRetention = lerp(SSPT_SHADOW_RETENTION, 1.0f, directShadow * directShadow);
+	rawGi *= shadowRetention;
+#if SSGI_SPECULAR_GI
+	specGi *= shadowRetention;
+#endif
 #endif
 
 	float receiverVis = tex2Dlod(SSGIVisibilityMapSamp, float4(uvCoord, 0.0f, 0.0f)).a;

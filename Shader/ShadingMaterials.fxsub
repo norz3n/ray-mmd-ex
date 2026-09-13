@@ -205,34 +205,38 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	DecodeYcbcr(source, coord, screenPosition, ViewportOffset2, diffuse, specular);
 
 #if SSDO_QUALITY
-	float4 ssdoData = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0));
-	bool isEmissiveOrGlass = (material.lightModel == SHADINGMODELID_GLASS || material.lightModel == SHADINGMODELID_EMISSIVE);
-	float ssao = isEmissiveOrGlass ? 1.0f : ssdoData.w;
-	ssao = min(ssao, material.visibility);
-	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	float skinAO = lerp(1.0f, ssao, SKIN_AO_STRENGTH);
-
-	// Jimenez Multi-Bounce inter-reflection color preservation
-	float3 aBounce = 2.0404f * material.albedo - 0.3324f;
-	float3 bBounce = -4.7951f * material.albedo + 0.6417f;
-	float3 cBounce = 2.7552f * material.albedo + 0.6903f;
-	float effectiveAOValue = isSkin ? skinAO : ssao;
-	float3 coloredAO = max(effectiveAOValue, ((effectiveAOValue * aBounce + bBounce) * effectiveAOValue + cBounce) * effectiveAOValue);
-
-	diffuse *= isEmissiveOrGlass ? 1.0f : coloredAO;
-
+	// Bent normal is still used for directional specular occlusion on IBL;
+	// diffuse AO is deferred to PostProcessAOComposite after SSGI runs.
+	float4 ssdoData  = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0));
 	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
-	float3 R = EnvironmentReflect(material.normal, V);
-	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001f);
-	float NdotV = abs(dot(material.normal, V)) + 1e-5f;
-	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, isSkin ? skinAO : ssao, material.smoothness);
-	float dirSpecOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
-	
-	// Jimenez / Frostbite Ground-Truth Specular Occlusion (GTSO)
+	float3 R          = EnvironmentReflect(material.normal, V);
+	float  roughness  = max(SmoothnessToRoughness(material.smoothness), 0.001f);
+	float  NdotV      = abs(dot(material.normal, V)) + 1e-5f;
+	bool   isSkin     = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+
+	// Specular occlusion still uses bent normal + AO (applied now, before SSR overlays)
+	float ssao        = min(ssdoData.w, material.visibility);
+	float skinAO      = lerp(1.0f, ssao, SKIN_AO_STRENGTH);
 	float effectiveAO = isSkin ? skinAO : ssao;
-	float gtso = saturate(pow(NdotV + effectiveAO, roughness * roughness) - 1.0f + effectiveAO);
-	float specOcc = min(lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f)), gtso);
+	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, effectiveAO, material.smoothness);
+	float dirSpecOcc  = ComputeDirectionalSpecularOcclusion(R, bentNormal, effectiveAO, roughness);
+	float gtso        = saturate(pow(NdotV + effectiveAO, roughness * roughness) - 1.0f + effectiveAO);
+	float specOcc     = min(lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f)), gtso);
 	specular *= isSkin ? lerp(1.0f, specOcc, SKIN_AO_STRENGTH) : specOcc;
+
+#if !GI_ENABLE
+	// GI is disabled: AOComposite pass won't run, so apply Jimenez multi-bounce diffuse AO here.
+	bool   isEmissiveOrGlass2 = (material.lightModel == SHADINGMODELID_GLASS || material.lightModel == SHADINGMODELID_EMISSIVE);
+	if (!isEmissiveOrGlass2)
+	{
+		float3 aBounce   = 2.0404f * material.albedo - 0.3324f;
+		float3 bBounce   = -4.7951f * material.albedo + 0.6417f;
+		float3 cBounce   = 2.7552f * material.albedo + 0.6903f;
+		float3 coloredAO = max(effectiveAO, ((effectiveAO * aBounce + bBounce) * effectiveAO + cBounce) * effectiveAO);
+		diffuse *= coloredAO;
+	}
+#endif
+	// When GI is enabled, diffuse AO is deferred to PostProcessAOComposite (runs after SSGI).
 #else
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	float vis = isSkin ? lerp(1.0f, material.visibility, 0.5f) : material.visibility;
