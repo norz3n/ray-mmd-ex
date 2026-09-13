@@ -429,7 +429,11 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 
 	historyAO = clamp(historyAO, minAO, maxAO);
 
-	float4 denoised = lerp(curAO, historyAO, 0.85f);
+	float2 motionPixels = (prevUV - uv) * ViewportSize;
+	float motionWeight = saturate(length(motionPixels) * 0.20f);
+	float blendWeight = lerp(0.85f, 0.0f, motionWeight);
+
+	float4 denoised = lerp(curAO, historyAO, blendWeight);
 
 	// Re-normalize bent normal after temporal blending to prevent vector length drift
 	float3 bn = denoised.xyz * 2.0f - 1.0f;
