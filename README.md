@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.15) :
+Reforge Exclusive Features (through v1.20.16) :
 ------------
 
 **Direct Screen-Space Core**
@@ -35,6 +35,8 @@ Reforge Exclusive Features (through v1.20.15) :
 * **Screen-Space Path Tracing (SSPT / RTGI 3.0 - `GI_ENABLE 3`, Default)**: next-generation path-traced room radiance engine inspired by Marty McFly's qUINT RTGI. Implements low-discrepancy Monte Carlo cosine-weighted hemisphere path tracing with golden angle rotation (`SSPT_GOLDEN_ANGLE = 2.39996323`), 1D Bayer dither stratification, and projected-axis orthonormal tangent frame (`BuildTangentMatrix`).
 * **Progressive Quadratic Ray Stepping & Depth Thickness Gating**: dense near-field precision with broad room reach (`lambda = s * sqrt(s)`), analytical depth thickness gating (`delta = (pSample - pRay) * invThickness`) preventing light leaking through walls, fingers, and hair.
 * **Secondary Bounce Feedback & Viewport-Boundary Radiance**: multi-bounce reflection feedback loop (`SSPT_BOUNCES 1`) with emissive transfer and escaped-ray sky radiance sampling preventing dark camera-edge halos.
+* **Deferred Ambient Occlusion Post-GI Composite**: deferred SSDO execution and introduced a dedicated post-GI pass (`Shader/PostProcessAOComposite.fxsub`) running after `SSGIFinalCombine`. Uniformly applies Jimenez multi-bounce AO across total composited radiance (direct + IBL + GI), preventing strong indirect bounces from bleaching contact shadows and crevices while preserving clean glass and emissive passthrough.
+* **Direct Solar Shadow Retention & Sky Radiance Calibration**: direct shadow gating (`SSPT_SHADOW_RETENTION 0.40`) in SSPT and SSGI resolves scaling indirect bounce against `ShadowMapSamp` via a quadratic penumbra response curve, keeping cast shadows deep and distinct without losing rich color bleeding. Replaced hardcoded unoccluded ray sky radiance with tunable `SSPT_SKY_LIGHT_AMOUNT 0.05` in `SSPT_Trace.fxsub`.
 * **Albedo-Driven Dynamic Skin Multi-Bounce & Linearized Cavity AO**: dynamic albedo interreflection curve (`1.0 + (mat.albedo * 2.2) / max(...)`) and softened linear cavity AO in SSPT/SSGI resolves, eliminating skin darkening and crushing in deep shadows.
 * **Dielectric Glass Resolve Bypass & Raymarch Transmission**: early-exit zero diffuse GI combine on `SHADINGMODELID_GLASS` preventing milky/matte fogging, and raymarch hit skipping (`continue`) allowing rays to transmit through glass without false bounce or artificial shadows.
 * **SSGI 3.0 (`GI_ENABLE 1 / 2`)**: Duff (2017) branchless orthonormal basis, stratified Halton (2, 3) sampling, per-pixel IGN rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and early thickness evaluation.
@@ -290,6 +292,8 @@ Algorithms implemented in the Screen-Space Path Tracing module, mapped to their 
 | Separable cross-bilateral À-Trous wavelet filter (`SSPT_Filter.fxsub`) | Dyadic stride progression with Karis luminance outlier rejection and normal/depth bilateral edge stops |
 | Albedo-driven dynamic skin multi-bounce curve (`SSPT_Resolve.fxsub`) | Dynamic interreflection scaling preventing skin crushing under indirect bounces |
 | Glass resolve bypass & transmission hit skipping (`SSPT_Resolve.fxsub`, `SSPT_Trace.fxsub`) | Optical glass transmission bypass preserving dielectric transparency without diffuse fogging |
+| Direct solar shadow retention (`SSPT_Resolve.fxsub`, `SSGI_Resolve.fxsub`) | Quadratic penumbra gating against directional shadow maps preventing indirect bounce blowout in cast shadows |
+| Deferred post-GI ambient occlusion composite (`Shader/PostProcessAOComposite.fxsub`) | Multi-bounce Jimenez AO composite applied post-GI to preserve deep contact darkening and crevice contrast |
 
 * (And many more from the original development team...)
 
