@@ -38,6 +38,10 @@ float4 AOCompositePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD
         tex2Dlod(Gbuffer8Map, float4(uvCoord, 0.0f, 0.0f)),
         mat);
 
+    // Sky / background passthrough: no geometry present, preserve sceneColor unchanged
+    if (!(mat.linearDepth > 1e-4f && mat.linearDepth < 1000.0f))
+        return sceneColor;
+
     // Emissive / glass: no AO darkening
     bool isEmissiveOrGlass = (mat.lightModel == SHADINGMODELID_GLASS ||
                               mat.lightModel == SHADINGMODELID_EMISSIVE);

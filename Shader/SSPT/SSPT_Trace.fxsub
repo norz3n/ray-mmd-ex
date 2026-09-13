@@ -104,10 +104,14 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		if (rayDir.z < -1e-4f)
 			currentRayDist = min(currentRayDist, -0.95f * zOrigin / rayDir.z);
 
+		// Project ray end into screen space for boundary / sky lookup
+		float3 pEnd = pOrigin + rayDir * currentRayDist;
+		float2 uvEnd = (pEnd.xy / max(pEnd.z, 1e-3f) - projInfo.zw) / projInfo.xy;
+		float2 deltaUV = uvEnd - uvCoord.xy;
+
 		float intersected = 0.0f;
 		float3 hitRadiance = 0.0f;
 		bool insideScreen = true;
-		float2 lastUV = uvCoord.xy;
 		float stepJitter = frac(ditherElev + float(r) * 0.61803398875f);
 
 		[loop]
@@ -183,28 +187,26 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					}
 				}
 			}
-
-			lastUV = rayUV;
 		}
 
-		// Sky / Environment Radiance for escaped rays (including rays exiting screen bounds).
-		// Guard: lastUV must point to a background pixel (no geometry depth) before treating it as sky.
-		// When rays graze the character silhouette, lastUV can land on geometry edge pixels whose lit
-		// color would otherwise leak into GI on the skybox and reflective surfaces as a bright "tail".
-		if (intersected < 0.25f)
+		// Seamless Environment / Sky IBL fallback for escaped or boundary rays (matching SSGI)
+		if (intersected < 0.85f)
 		{
-			float zSkyGuard = tex2Dlod(Gbuffer8Map, float4(saturate(lastUV), 0.0f, 0.0f)).r;
-			[branch]
-			if (!(zSkyGuard > 1e-3f && zSkyGuard < 1000.0f))
+			float2 skyUv = saturate(uvCoord.xy + deltaUV);
+			float skyDepth = GetSSPTLinearDepth(skyUv);
+			if (skyDepth <= 1e-4f)
 			{
 				float NdotSky = saturate(dot(nOrigin, rayDir));
+				if (NdotSky > 0.0f)
+				{
 #if IBL_QUALITY
-				float3 skyRadiance = SampleSkyRadiance(saturate(lastUV));
+					float3 skyColor = SampleSkyRadiance(skyUv);
 #else
-				float3 skyRadiance = srgb2linear(tex2Dlod(ScnSamp, float4(saturate(lastUV), 0.0f, 0.0f)).rgb);
+					float3 skyColor = srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
 #endif
-				float skyWeight = NdotSky * lerp(SSPT_SKY_LIGHT_AMOUNT, 1.00f, mDbgSSGISkyLight) * (1.0f - intersected);
-				hitRadiance += clamp(skyRadiance, 0.0f, 10.0f) * skyWeight;
+					float skyWeight = NdotSky * lerp(SSPT_SKY_LIGHT_AMOUNT, 1.00f, mDbgSSGISkyLight) * (1.0f - intersected);
+					hitRadiance += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
+				}
 			}
 		}
 
